@@ -2,45 +2,19 @@ import asyncio
 import os
 import json
 
-@nightyScript(
-    name="Channel Locker",
-    author="thatdudepyro",
-    description="Lock/unlock or lockdown/unlockdown a channel.",
-    usage="<p>lock | <p>unlock | <p>lockdown | <p>unlockdown"
-)
-def script_function():
-    """
-    CHANNEL LOCKER
-    ---------------------------------
-    Locks/unlocks a channel by modifying permissions for all roles with existing overrides.
-    Saves original permission states to a file for accurate restoration later.
-
-    COMMANDS:
-    <p>lock         - Prevents all roles from sending messages (saves their original state).
-    <p>unlock       - Restores original send_message permission per role.
-    <p>lockdown     - Hides the channel and prevents sending (saves both states).
-    <p>unlockdown   - Restores original read_message and send_message permissions per role.
-
-    NOTES:
-    - Only roles with existing overrides are affected.
-    """
-
+def channel_locker_logic():
     # File path
     perm_file_path = os.path.expandvars(
         "%APPDATA%\\Nighty Selfbot\\data\\scripts\\json\\lockperms.json"
     )
-
-    # Ensure folder exists
     os.makedirs(os.path.dirname(perm_file_path), exist_ok=True)
 
-    # Load permissions from file
     def load_permissions():
         if os.path.isfile(perm_file_path):
             with open(perm_file_path, "r") as f:
                 return json.load(f)
         return {}
 
-    # Save permissions to file
     def save_permissions(data):
         with open(perm_file_path, "w") as f:
             json.dump(data, f, indent=2)
@@ -60,8 +34,6 @@ def script_function():
             await ctx.channel.set_permissions(role, overwrite=overwrites)
 
         save_permissions(perms)
-
-        # Send visible message for lock
         await ctx.send("# 🔒 Channel is locked")
         await ctx.message.add_reaction("✅")
 
@@ -81,7 +53,6 @@ def script_function():
             overwrites.send_messages = original_value
             await ctx.channel.set_permissions(role, overwrite=overwrites)
 
-        # Send visible message for unlock
         await ctx.send("# 🔓 Channel is unlocked")
         await ctx.message.add_reaction("✅")
 
@@ -141,5 +112,3 @@ def script_function():
     @bot.command(name="unlockdown")
     async def unlockdown(ctx):
         await unlockdown_channel(ctx)
-
-script_function()
