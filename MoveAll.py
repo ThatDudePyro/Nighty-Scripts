@@ -1,4 +1,7 @@
 def channel_mover_logic():
+    import discord
+    from discord.ext import commands
+
     @bot.command(name="moveall")
     async def moveall(ctx, target_channel_id: int):
         source_channel = ctx.channel
@@ -10,15 +13,10 @@ def channel_mover_logic():
 
         await ctx.send(f"📦 Moving all messages from {source_channel.mention} to {target_channel.mention}...")
 
-        messages = [message async for message in source_channel.history(limit=None, oldest_first=True)]
-
-        for msg in messages:
-            content = msg.content if msg.content else ""
-            files = []
-            for attachment in msg.attachments:
-                file = await attachment.to_file()
-                files.append(file)
-
-            await target_channel.send(content, files=files)
+        async for msg in source_channel.history(limit=None, oldest_first=True):
+            content = msg.content if msg.content else None
+            files = [await a.to_file() for a in msg.attachments]
+            if content or files:
+                await target_channel.send(content or "", files=files)
 
         await ctx.send("✅ All messages have been moved.")
