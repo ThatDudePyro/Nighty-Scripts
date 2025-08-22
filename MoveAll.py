@@ -5,23 +5,24 @@ async def moveall_logic():
         name="moveall",
         description="Move all messages from the current channel into another channel (ID, mention, or link)."
     )
-    async def moveall_cmd(ctx, target_ref: str):
+    async def moveall_cmd(ctx, target_ref: str):  # STRING, not int
         # auto-clean the trigger
         try:
             await ctx.message.delete()
         except:
             pass
 
-        # parse input (ID, mention, or link)
-        match = re.search(r"(\d{17,20})$", target_ref)
+        # parse numeric ID from mention or link
+        match = re.search(r"(\d{17,20})", target_ref)
         if not match:
             await ctx.send("❌ Could not parse the channel reference.")
             return
         channel_id = int(match.group(1))
 
+        # get channel globally
         target = bot.get_channel(channel_id)
         if not target:
-            await ctx.send("❌ Invalid channel ID or I don’t have access.")
+            await ctx.send("❌ Invalid channel ID or access denied.")
             return
 
         moved = 0
