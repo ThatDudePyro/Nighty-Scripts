@@ -53,14 +53,34 @@ def find_best_match(song_title, artist_name, hits):
     
     return best_match, best_score
 
+def clean_song_info(text):
+    """Remove paused indicator and clean up song/artist text."""
+    if not text:
+        return ""
+    
+    # Remove "(paused)" indicator (case insensitive)
+    cleaned = text.replace("(paused)", "").replace("(Paused)", "").replace("(PAUSED)", "")
+    
+    # Remove extra whitespace
+    cleaned = " ".join(cleaned.split())
+    
+    return cleaned.strip()
+
 # Core lyric-fetching logic
 async def fetch_lyrics(bot):
     """Fetch lyrics for the currently playing song."""
     try:
-        song = bot.config.get("spotify_song")
-        artist = bot.config.get("spotify_artist", "")
+        raw_song = bot.config.get("spotify_song")
+        raw_artist = bot.config.get("spotify_artist", "")
         
-        if not song:
+        if not raw_song:
+            return "# No song currently playing"
+
+        # Clean the song and artist info
+        song = clean_song_info(raw_song)
+        artist = clean_song_info(raw_artist)
+        
+        if not song:  # If song becomes empty after cleaning
             return "# No song currently playing"
 
         display_info = f"**{song}**" + (f" by **{artist}**" if artist else "")
