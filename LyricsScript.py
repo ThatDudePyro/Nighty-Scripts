@@ -45,17 +45,6 @@ def find_best_match(song_title, artist_name, hits):
     
     return best_match, best_score
 
-def clean_song_info(text):
-    if not text:
-        return ""
-    
-    # Remove "(paused)" indicator (case insensitive)
-    cleaned = text.replace("(paused)", "").replace("(Paused)", "").replace("(PAUSED)", "")
-    
-    cleaned = " ".join(cleaned.split())
-    
-    return cleaned.strip()
-
 async def fetch_lyrics(bot):
     try:
         raw_song = bot.config.get("spotify_song")
