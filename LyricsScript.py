@@ -113,7 +113,7 @@ async def fetch_lyrics(bot):
             search_encoded = search_query.replace(' ', '+').replace('&', '%26')
             fallback_url = f"https://genius.com/search?q={search_encoded}"
             print(f"Using fallback search for: {search_query}", type_="INFO")
-            return f"# Search lyrics for {display_info}\n{fallback_url}"
+            return f"# 🎙 Lyrics for {display_info}\n{fallback_url}"
         
         return "# Lyrics not found"
         
