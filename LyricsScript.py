@@ -194,4 +194,4 @@ async def lyrics_command(ctx, *, args: str = ""):
             print(f"Error in lyrics command: {e}", type_="ERROR")
             await ctx.send("# Error fetching lyrics")
 
-print("Lyrics script loaded successfully from GitHub", type_="SUCCESS")
+print("Lyrics script loaded successfully", type_="SUCCESS")
