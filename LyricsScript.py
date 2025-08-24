@@ -1,15 +1,70 @@
 import asyncio
 import aiohttp
 
+def calculate_similarity(str1, str2):
+    """Calculate similarity between two strings using simple matching."""
+    str1 = str1.lower().strip()
+    str2 = str2.lower().strip()
+    
+    # Exact match
+    if str1 == str2:
+        return 100
+    
+    # Check if one contains the other
+    if str1 in str2 or str2 in str1:
+        return 80
+    
+    # Word-based matching
+    words1 = set(str1.split())
+    words2 = set(str2.split())
+    
+    if not words1 or not words2:
+        return 0
+    
+    intersection = len(words1.intersection(words2))
+    union = len(words1.union(words2))
+    
+    return int((intersection / union) * 70)
+
+def find_best_match(song_title, artist_name, hits):
+    """Find the best matching song from Genius search results."""
+    best_match = None
+    best_score = 0
+    
+    for hit in hits:
+        result = hit.get("result", {})
+        genius_title = result.get("title", "")
+        genius_artist = result.get("primary_artist", {}).get("name", "")
+        
+        # Calculate title similarity
+        title_score = calculate_similarity(song_title, genius_title)
+        
+        # Calculate artist similarity
+        artist_score = calculate_similarity(artist_name, genius_artist) if artist_name else 50
+        
+        # Combined score (title is more important)
+        combined_score = (title_score * 0.7) + (artist_score * 0.3)
+        
+        print(f"Match candidate: '{genius_title}' by '{genius_artist}' - Score: {combined_score:.1f}", type_="INFO")
+        
+        if combined_score > best_score:
+            best_score = combined_score
+            best_match = result
+    
+    return best_match, best_score
+
 # Core lyric-fetching logic
 async def fetch_lyrics(bot):
     """Fetch lyrics for the currently playing song."""
     try:
         song = bot.config.get("spotify_song")
+        artist = bot.config.get("spotify_artist", "")
+        
         if not song:
             return "# No song currently playing"
 
-        print(f"Fetching lyrics for: {song}", type_="INFO")
+        display_info = f"**{song}**" + (f" by **{artist}**" if artist else "")
+        print(f"Fetching lyrics for: {song}" + (f" by {artist}" if artist else ""), type_="INFO")
 
         # Try Genius API if key is configured
         genius_key = getConfigData().get("lyrics_genius_key", "")
@@ -17,21 +72,39 @@ async def fetch_lyrics(bot):
             try:
                 async with aiohttp.ClientSession() as session:
                     headers = {"Authorization": f"Bearer {genius_key}"}
-                    # URL encode the song title for the search
-                    encoded_song = song.replace(' ', '%20').replace('&', '%26')
-                    search_url = f"https://api.genius.com/search?q={encoded_song}"
+                    
+                    # Create search query with both song and artist
+                    search_query = song
+                    if artist:
+                        search_query += f" {artist}"
+                    
+                    # URL encode the search query
+                    encoded_query = search_query.replace(' ', '%20').replace('&', '%26')
+                    search_url = f"https://api.genius.com/search?q={encoded_query}"
                     
                     async with session.get(search_url, headers=headers, timeout=10) as resp:
                         if resp.status == 200:
                             data = await resp.json()
+                            hits = data.get("response", {}).get("hits", [])
                             
-                            if data.get("response", {}).get("hits"):
-                                song_path = data["response"]["hits"][0]["result"]["path"]
-                                lyrics_url = f"https://genius.com{song_path}"
-                                print(f"Found Genius lyrics URL for: {song}", type_="SUCCESS")
-                                return f"# Lyrics for **{song}**\n{lyrics_url}"
+                            if hits:
+                                # Find the best matching song
+                                best_match, best_score = find_best_match(song, artist, hits)
+                                
+                                if best_match and best_score > 30:  # Minimum threshold
+                                    song_path = best_match.get("path", "")
+                                    genius_title = best_match.get("title", "")
+                                    genius_artist = best_match.get("primary_artist", {}).get("name", "")
+                                    
+                                    lyrics_url = f"https://genius.com{song_path}"
+                                    match_info = f"'{genius_title}' by '{genius_artist}' (Match: {best_score:.1f}%)"
+                                    
+                                    print(f"Best match found: {match_info}", type_="SUCCESS")
+                                    return f"# Lyrics for {display_info}\n**Found:** {match_info}\n{lyrics_url}"
+                                else:
+                                    print(f"No good matches found (best score: {best_score:.1f}%)", type_="INFO")
                             else:
-                                print(f"No Genius results found for: {song}", type_="INFO")
+                                print(f"No Genius results found for: {search_query}", type_="INFO")
                         else:
                             print(f"Genius API returned status {resp.status}", type_="ERROR")
                             
@@ -43,11 +116,14 @@ async def fetch_lyrics(bot):
         # Fallback behavior
         use_fallback = getConfigData().get("lyrics_use_fallback", True)
         if use_fallback:
-            # Create a search-friendly version of the song title
-            search_song = song.replace(' ', '+').replace('&', '%26')
-            fallback_url = f"https://genius.com/search?q={search_song}"
-            print(f"Using fallback search for: {song}", type_="INFO")
-            return f"# Search lyrics for **{song}**\n{fallback_url}"
+            # Create a search-friendly version including artist
+            search_query = song
+            if artist:
+                search_query += f" {artist}"
+            search_encoded = search_query.replace(' ', '+').replace('&', '%26')
+            fallback_url = f"https://genius.com/search?q={search_encoded}"
+            print(f"Using fallback search for: {search_query}", type_="INFO")
+            return f"# Search lyrics for {display_info}\n{fallback_url}"
         
         return "# Lyrics not found"
         
