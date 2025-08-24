@@ -53,9 +53,6 @@ async def fetch_lyrics(bot):
         if not raw_song:
             return "# No song currently playing"
 
-        song = clean_song_info(raw_song)
-        artist = clean_song_info(raw_artist)
-        
         if not song:
             return "# No song currently playing"
 
