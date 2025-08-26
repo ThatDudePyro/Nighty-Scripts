@@ -165,7 +165,7 @@ async def fetch_lyrics(bot):
                                     genius_artist = best_match.get("primary_artist", {}).get("name", "")
                                     
                                     lyrics_url = f"https://genius.com{song_path}"
-                                    match_info = f"'{genius_title}' by '{genius_artist}' (Match: {best_score:.1f}%)"
+                                    match_info = f"'{genius_title}' by '{genius_artist}'"
                                     
                                     return f"# Lyrics for {display_info}\n**Found:** {match_info}\n{lyrics_url}"
                         else:
@@ -314,4 +314,4 @@ async def lyrics_command(ctx, *, args: str = ""):
             print(f"Error in lyrics command: {e}", type_="ERROR")
             await ctx.send(f"# Command error: {str(e)}")
 
-print("Lyrics script loaded successfully from GitHub", type_="SUCCESS")
+print("Lyrics script loaded successfully", type_="SUCCESS")
