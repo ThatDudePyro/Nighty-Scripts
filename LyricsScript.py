@@ -75,6 +75,13 @@ async def test_genius_api_key(api_key):
         print(f"API key test error: {e}", type_="ERROR")
         return False, f"Network error: {str(e)}"
 
+# Initialize config on first load (sync only)
+try:
+    load_config()  # This will create the file if it doesn't exist
+    print("Lyrics config initialized successfully", type_="SUCCESS")
+except Exception as e:
+    print(f"Warning: Could not initialize config: {e}", type_="ERROR")
+
 def calculate_similarity(str1, str2):
     """Calculate similarity between two strings using simple matching."""
     if not str1 or not str2:
