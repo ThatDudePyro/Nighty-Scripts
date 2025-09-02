@@ -12,7 +12,7 @@ CONFIG_PATH = Path(os.path.expandvars(r"%APPDATA%\Nighty Selfbot\data\scripts\js
 
 # Cache for API responses (in-memory)
 lyrics_cache: Dict[str, Dict[str, Any]] = {}
-CACHE_EXPIRY = 3600  # 1 hour in seconds
+CACHE_EXPIRY = 86400  # 1 hour in seconds
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from JSON file with better error handling."""
@@ -249,8 +249,8 @@ def save_to_cache(song: str, artist: str, result: str) -> None:
         "timestamp": time.time()
     }
     
-    # Clean old cache entries (keep only last 100)
-    if len(lyrics_cache) > 100:
+    # Clean old cache entries
+    if len(lyrics_cache) > 500:
         oldest_keys = sorted(lyrics_cache.keys(), 
                            key=lambda k: lyrics_cache[k]["timestamp"])[:20]
         for key in oldest_keys:
