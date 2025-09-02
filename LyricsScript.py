@@ -94,6 +94,8 @@ def save_cache() -> None:
             json.dump(lyrics_cache, f, indent=2, ensure_ascii=False)
     except Exception as e:
         print(f"Error saving cache: {e}", type_="WARNING")
+
+def get_config_value(key: str, default: Any = None) -> Any:
     """Get a single config value with type safety."""
     config = load_config()
     return config.get(key, default)
