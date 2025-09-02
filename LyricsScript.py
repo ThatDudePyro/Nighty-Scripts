@@ -76,15 +76,17 @@ def lyrics():
     def set_config_value(key: str, value: Any) -> bool:
         """Set a single config value with validation."""
         config = load_config()
+        print(f"{key}, {value}")
         
         # Validate certain config values
-        if key == "timeout" and not isinstance(value, (int, float)) or value <= 0:
+        if not isinstance(value,str):
+         if key == "timeout" and not isinstance(value, (int, float)) or value <= 0:
             print(f"Invalid timeout value: {value}", type_="ERROR")
             return False
-        if key == "max_retries" and not isinstance(value, int) or value < 0:
+         if key == "max_retries" and not isinstance(value, int) or value < 0:
             print(f"Invalid max_retries value: {value}", type_="ERROR")
             return False
-        if key == "match_threshold" and not isinstance(value, (int, float)) or not 0 <= value <= 100:
+         if key == "match_threshold" and not isinstance(value, (int, float)) or not 0 <= value <= 100:
             print(f"Invalid match_threshold value: {value}", type_="ERROR")
             return False
         
