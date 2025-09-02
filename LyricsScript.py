@@ -10,10 +10,9 @@ from typing import Dict, List, Tuple, Optional, Any
 # Config file path
 CONFIG_PATH = Path(os.path.expandvars(r"%APPDATA%\Nighty Selfbot\data\scripts\json\LyricsConfig.json"))
 
-# Cache for API responses (persistent file-based)
+# Cache for API responses (in-memory)
 lyrics_cache: Dict[str, Dict[str, Any]] = {}
-CACHE_EXPIRY = 2592000  # 30 days in seconds (30 * 24 * 60 * 60)
-CACHE_FILE = CONFIG_PATH.parent / "LyricsCache.json"
+CACHE_EXPIRY = 3600  # 1 hour in seconds
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from JSON file with better error handling."""
@@ -67,33 +66,6 @@ def save_config(config: Dict[str, Any]) -> bool:
     except Exception as e:
         print(f"Error saving config: {e}", type_="ERROR")
         return False
-
-def load_cache() -> Dict[str, Any]:
-    """Load cache from disk."""
-    global lyrics_cache
-    try:
-        if CACHE_FILE.exists():
-            with open(CACHE_FILE, 'r', encoding='utf-8') as f:
-                lyrics_cache = json.load(f)
-                # Clean expired entries on load
-                current_time = time.time()
-                lyrics_cache = {k: v for k, v in lyrics_cache.items() 
-                              if current_time - v.get("timestamp", 0) < CACHE_EXPIRY}
-                print(f"Loaded {len(lyrics_cache)} cached entries", type_="INFO")
-        return lyrics_cache
-    except Exception as e:
-        print(f"Error loading cache: {e}", type_="WARNING")
-        lyrics_cache = {}
-        return lyrics_cache
-
-def save_cache() -> None:
-    """Save cache to disk."""
-    try:
-        CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(lyrics_cache, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        print(f"Error saving cache: {e}", type_="WARNING")
 
 def get_config_value(key: str, default: Any = None) -> Any:
     """Get a single config value with type safety."""
@@ -260,10 +232,6 @@ def get_from_cache(song: str, artist: str) -> Optional[str]:
     if not get_config_value("cache_enabled", True):
         return None
     
-    # Ensure cache is loaded
-    if not lyrics_cache:
-        load_cache()
-    
     cache_key = get_cache_key(song, artist)
     if cache_key in lyrics_cache and is_cache_valid(lyrics_cache[cache_key]):
         print("Using cached result", type_="INFO")
@@ -271,28 +239,22 @@ def get_from_cache(song: str, artist: str) -> Optional[str]:
     return None
 
 def save_to_cache(song: str, artist: str, result: str) -> None:
-    """Save result to cache and persist to disk."""
+    """Save result to cache."""
     if not get_config_value("cache_enabled", True):
         return
     
     cache_key = get_cache_key(song, artist)
     lyrics_cache[cache_key] = {
         "result": result,
-        "timestamp": time.time(),
-        "song": song,
-        "artist": artist
+        "timestamp": time.time()
     }
     
-    # Clean old cache entries (keep only last 500 instead of 100)
-    if len(lyrics_cache) > 500:
+    # Clean old cache entries (keep only last 100)
+    if len(lyrics_cache) > 100:
         oldest_keys = sorted(lyrics_cache.keys(), 
-                           key=lambda k: lyrics_cache[k]["timestamp"])[:50]
+                           key=lambda k: lyrics_cache[k]["timestamp"])[:20]
         for key in oldest_keys:
             del lyrics_cache[key]
-        print(f"Cleaned {len(oldest_keys)} old cache entries", type_="INFO")
-    
-    # Save to disk
-    save_cache()
 
 async def fetch_lyrics(bot) -> str:
     """Fetch lyrics for the currently playing song with enhanced features."""
@@ -434,14 +396,6 @@ async def lyrics_command(ctx, *, args: str = ""):
         song = ctx.bot.config.get("spotify_song", "Not found") if bot_has_config else "No config"
         artist = ctx.bot.config.get("spotify_artist", "Not found") if bot_has_config else "No config"
         
-        # Ensure cache is loaded for accurate count
-        if cache_enabled and not lyrics_cache:
-            load_cache()
-        
-        # Ensure cache is loaded for accurate count  
-        if cache_enabled and not lyrics_cache:
-            load_cache()
-        
         cache_info = f"{len(lyrics_cache)} entries" if cache_enabled else "Disabled"
         
         debug_msg = f"""# **Lyrics Debug Information**
@@ -450,8 +404,7 @@ async def lyrics_command(ctx, *, args: str = ""):
 - File exists: {'✅ Yes' if CONFIG_PATH.exists() else '❌ No'}
 - Genius Key: {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
 - Fallback Mode: {'✅ Enabled' if fallback else '❌ Disabled'}
-- Cache: {cache_info} (30-day expiry)
-- Cache File: `{CACHE_FILE}`
+- Cache: {cache_info}
 - Match Threshold: {match_threshold}%
 - Timeout: {timeout}s
 - Max Retries: {max_retries}
@@ -474,13 +427,7 @@ async def lyrics_command(ctx, *, args: str = ""):
     
     elif subcommand == "clearcache":
         lyrics_cache.clear()
-        # Also delete the cache file
-        try:
-            if CACHE_FILE.exists():
-                CACHE_FILE.unlink()
-            await ctx.send(f"# ✅ Cache cleared successfully ({len(lyrics_cache)} entries removed)")
-        except Exception as e:
-            await ctx.send(f"# ✅ Cache cleared from memory (file deletion failed: {e})")
+        await ctx.send("# ✅ Cache cleared successfully")
         return
         
     elif subcommand == "threshold":
@@ -556,8 +503,7 @@ async def lyrics_command(ctx, *, args: str = ""):
 **Config File:** `{CONFIG_PATH}`
 **Genius API Key:** {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
 **Fallback Mode:** {'✅ Enabled' if fallback else '❌ Disabled'}
-**Cache:** {cache_info} (30-day expiry)
-**Cache File:** `{CACHE_FILE}`
+**Cache:** {cache_info}
 **Match Threshold:** {match_threshold}%
 **Timeout:** {timeout}s
 **Max Retries:** {max_retries}
@@ -595,7 +541,4 @@ async def lyrics_command(ctx, *, args: str = ""):
             print(f"Error in lyrics command: {e}", type_="ERROR")
             await ctx.send(f"# Command error: {str(e)}")
 
-# Load cache on script startup
-load_cache()
-
-print("Spotify Lyrics script loaded successfully", type_="SUCCESS")
+print("Enhanced Lyrics script loaded successfully", type_="SUCCESS")
