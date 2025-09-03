@@ -318,7 +318,7 @@ def lyrics():
             song = song.strip()
             artist = artist.strip() if artist else ""
 
-            display_info = f"**{song}**" + (f" by **{artist}**" if artist else "")
+            display_info = f"**`{song}`**" + (f" by **`{artist}`**" if artist else "")
 
             # Check cache first
             cached_result = get_from_cache(song, artist)
@@ -361,8 +361,8 @@ def lyrics():
                                                 genius_artist = best_match.get("primary_artist", {}).get("name", "")
                                                 
                                                 lyrics_url = f"https://genius.com{song_path}"
-                                                match_info = f"'{genius_title}' by '{genius_artist}' (Match: {best_score:.1f}%)"
-                                                result = f"# Lyrics for {display_info}\n**Found:** {match_info}\n{lyrics_url}"
+                                                match_info = f"`{genius_title}` by `{genius_artist}` (Match: {best_score:.1f}%)"
+                                                result = f"# Lyrics for: {display_info}\n**Found:** `{match_info}`\n{lyrics_url}"
                                                 
                                                 save_to_cache(song, artist, result)
                                                 return result
