@@ -250,7 +250,7 @@ def lyrics():
         if best_match:
             genius_title = best_match.get("title", "")
             genius_artist = best_match.get("primary_artist", {}).get("name", "")
-            print(f"Best match: '{genius_title}' by '{genius_artist}' - Score: {best_score:.1f}%", type_="INFO")
+            print(f"Best match: `{genius_title}` by `{genius_artist}` - Score: {best_score:.1f}%", type_="INFO")
         else:
             print(f"No matches found above threshold ({match_threshold}%)", type_="INFO")
         
