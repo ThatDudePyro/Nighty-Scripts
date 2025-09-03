@@ -361,8 +361,8 @@ def lyrics():
                                                 genius_artist = best_match.get("primary_artist", {}).get("name", "")
                                                 
                                                 lyrics_url = f"https://genius.com{song_path}"
-                                                match_info = f"`{genius_title}` by `{genius_artist}` (Match: {best_score:.1f}%)"
-                                                result = f"# Lyrics for: {display_info}\n**Found:** {match_info}\n{lyrics_url}"
+                                                match_info = f"`{genius_title}` by `{genius_artist}`\n(Match: `{best_score:.1f}%`)"
+                                                result = f"Lyrics for:\n# {display_info}\n**Found:** {match_info}\n{lyrics_url}"
                                                 
                                                 save_to_cache(song, artist, result)
                                                 return result
