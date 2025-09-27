@@ -49,10 +49,10 @@ def AutoReplyScript():
         gap=4
     )
 
-    main_container = tab.create_container(type="columns", gap=4)
+    main_container = tab.create_container(type="rows", gap=4)
+    top_container = main_container.create_container(type="columns", gap=4)
 
-    # COLUMN 1 - SETTINGS
-    settings_card = main_container.create_card(gap=3)
+    settings_card = top_container.create_card(gap=3)
     settings_card.create_ui_element(UI.Text, content="Settings", size="xl", weight="bold")
     
     enable_toggle = settings_card.create_ui_element(UI.Toggle, label="Enable Auto Reply")
@@ -61,29 +61,28 @@ def AutoReplyScript():
     delay_input = settings_card.create_ui_element(UI.Input, label="Default Delay", placeholder="10", value="10")
     save_btn = settings_card.create_ui_element(UI.Button, label="Save Settings", variant="cta")
 
-    # COLUMN 2 - ADD TRIGGERS  
-    add_card = main_container.create_card(gap=3)
+    add_card = top_container.create_card(gap=3)
     add_card.create_ui_element(UI.Text, content="Add Trigger", size="xl", weight="bold")
     
     trigger_input = add_card.create_ui_element(UI.Input, label="Trigger Message", placeholder="Hello bot")
     reply_input = add_card.create_ui_element(UI.Input, label="Reply Message", placeholder="Hi there!")
     channel_input = add_card.create_ui_element(UI.Input, label="Channel ID", placeholder="123456789012345678")
     delay_trigger_input = add_card.create_ui_element(UI.Input, label="Delay (seconds)", placeholder="10")
+    fuzzy_toggle = add_card.create_ui_element(UI.Toggle, label="Fuzzy Match (contains phrase)")
+    blacklist_input = add_card.create_ui_element(UI.Input, label="Ignore if contains (optional)", placeholder="stop, ignore, no")
     add_btn = add_card.create_ui_element(UI.Button, label="Add Trigger", variant="cta")
 
-    # COLUMN 3 - STATUS & TRIGGERS
     status_card = main_container.create_card(gap=3)
-    status_card.create_ui_element(UI.Text, content="Status", size="xl", weight="bold")
+    status_card.create_ui_element(UI.Text, content="Status & Current Triggers", size="xl", weight="bold")
     
-    status_text = status_card.create_ui_element(UI.Text, content="Auto Reply is enabled", size="base", color="#4ade80")
-    count_text = status_card.create_ui_element(UI.Text, content="0 triggers", size="base", color="#6b7280")
+    status_row = status_card.create_group(type="columns", gap=4, full_width=True)
+    status_text = status_row.create_ui_element(UI.Text, content="Auto Reply is enabled", size="base", color="#4ade80")
+    count_text = status_row.create_ui_element(UI.Text, content="0 triggers", size="base", color="#6b7280")
     
-    triggers_section_title = status_card.create_ui_element(UI.Text, content="Current Triggers:", size="lg", weight="bold")
+    status_card.create_ui_element(UI.Text, content="Current Triggers:", size="lg", weight="bold")
     
-    # Display triggers as text
     triggers_display = status_card.create_group(type="rows", gap=1)
     
-    # Individual trigger removal using select dropdown
     remove_select = status_card.create_ui_element(UI.Select,
         label="Select Trigger to Remove",
         items=[{"id": "", "title": "No triggers available"}],
@@ -92,8 +91,10 @@ def AutoReplyScript():
     remove_btn = status_card.create_ui_element(UI.Button, label="Remove Selected Trigger", variant="flat")
     # --- END UI SETUP ---
 
-    # Functions defined after UI elements are created
-    trigger_text_elements = []  # Track text elements for visibility control
+    trigger_text_elements = []
+    
+    def fuzzy_match(message, trigger_phrase):
+        return trigger_phrase.lower() in message.lower()
     
     def update_display():
         config = load_config()
@@ -104,13 +105,14 @@ def AutoReplyScript():
         status_text.color = "#4ade80" if enabled else "#f87171"
         count_text.content = f"{trigger_count} triggers configured"
         
-        # Update select dropdown options
         if config.get("triggers"):
             items = []
             for i, trigger in enumerate(config["triggers"]):
+                match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
+                blacklist_info = f" | Ignores: {trigger['blacklist']}" if trigger.get("blacklist") else ""
                 items.append({
                     "id": str(i),
-                    "title": f"{i+1}. '{trigger['trigger_message']}' → '{trigger['reply_message']}'"
+                    "title": f"{i+1}. '{trigger['trigger_message']}' → '{trigger['reply_message']}' ({match_type}{blacklist_info})"
                 })
             remove_select.items = items
         else:
@@ -119,15 +121,15 @@ def AutoReplyScript():
     def refresh_triggers():
         config = load_config()
         
-        # Hide all existing trigger text elements
         for element in trigger_text_elements:
             element.visible = False
         trigger_text_elements.clear()
         
-        # Create new text elements for current triggers
         if config.get("triggers"):
             for i, trigger in enumerate(config["triggers"]):
-                text = f"{i+1}. '{trigger['trigger_message']}' → '{trigger['reply_message']}' (Ch: {trigger['channel_id']})"
+                match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
+                blacklist_info = f" | Ignores: {trigger['blacklist']}" if trigger.get("blacklist") else ""
+                text = f"{i+1}. '{trigger['trigger_message']}' → '{trigger['reply_message']}' (Ch: {trigger['channel_id']}, {match_type}{blacklist_info})"
                 text_element = triggers_display.create_ui_element(UI.Text, content=text, size="sm")
                 trigger_text_elements.append(text_element)
         else:
@@ -179,6 +181,8 @@ def AutoReplyScript():
         reply_msg = reply_input.value.strip()
         channel_id = channel_input.value.strip()
         delay = delay_trigger_input.value.strip()
+        fuzzy = fuzzy_toggle.checked
+        blacklist = blacklist_input.value.strip()
 
         if not all([trigger_msg, reply_msg, channel_id, delay]):
             tab.toast(type="ERROR", title="Missing Information", description="Fill all fields")
@@ -199,25 +203,34 @@ def AutoReplyScript():
                 tab.toast(type="ERROR", title="Duplicate Trigger", description="This trigger already exists for this channel")
                 return
         
-        config["triggers"].append({
+        new_trigger = {
             "trigger_message": trigger_msg,
             "reply_message": reply_msg, 
             "channel_id": channel_id,
-            "delay": delay_num
-        })
+            "delay": delay_num,
+            "fuzzy_match": fuzzy
+        }
+        
+        if blacklist:
+            new_trigger["blacklist"] = blacklist
+        
+        config["triggers"].append(new_trigger)
         
         if save_config(config):
             trigger_input.value = ""
             reply_input.value = ""
             channel_input.value = ""
             delay_trigger_input.value = ""
+            fuzzy_toggle.checked = False
+            blacklist_input.value = ""
             
             refresh_triggers()
-            tab.toast(type="SUCCESS", title="Trigger Added", description=f"Added: '{trigger_msg}'")
+            match_type = "Fuzzy" if fuzzy else "Exact"
+            blacklist_info = f" with blacklist: {blacklist}" if blacklist else ""
+            tab.toast(type="SUCCESS", title="Trigger Added", description=f"Added: '{trigger_msg}' ({match_type}{blacklist_info})")
         else:
             tab.toast(type="ERROR", title="Save Failed", description="Failed to save trigger")
 
-    # Bind events
     save_btn.onClick = save_settings
     add_btn.onClick = add_trigger
     remove_btn.onClick = remove_selected_trigger
@@ -238,17 +251,30 @@ def AutoReplyScript():
             return
 
         for trigger in config["triggers"]:
-            trigger_msg = trigger["trigger_message"].lower()
-            incoming_msg = message.content.strip().lower()
+            trigger_msg = trigger["trigger_message"]
+            incoming_msg = message.content.strip()
             channel_match = str(message.channel.id) == trigger["channel_id"]
             
-            if incoming_msg == trigger_msg and channel_match:
+            if trigger.get("blacklist"):
+                blacklist_phrases = [phrase.strip().lower() for phrase in trigger["blacklist"].split(",")]
+                message_lower = incoming_msg.lower()
+                
+                if any(phrase in message_lower for phrase in blacklist_phrases if phrase):
+                    continue
+            
+            if trigger.get("fuzzy_match", False):
+                match = fuzzy_match(incoming_msg, trigger_msg) and channel_match
+            else:
+                match = incoming_msg.lower() == trigger_msg.lower() and channel_match
+            
+            if match:
                 delay = trigger.get("delay", config["default_delay"])
                 
                 if config.get("notify_on_send", True):
                     server_name = getattr(message.guild, 'name', 'DM') if message.guild else 'DM'
                     channel_name = getattr(message.channel, 'name', 'Unknown')
-                    print(f"Auto Reply | Triggered in #{channel_name} ({server_name}) - responding in {delay}s", type_="INFO")
+                    match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
+                    print(f"Auto Reply | {match_type} match in #{channel_name} ({server_name}) - responding in {delay}s", type_="INFO")
                 
                 if delay > 0:
                     await asyncio.sleep(delay)
@@ -271,5 +297,4 @@ def AutoReplyScript():
 
     tab.render()
 
-# Execute the function when loaded
 AutoReplyScript()
