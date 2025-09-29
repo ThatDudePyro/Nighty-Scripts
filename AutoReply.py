@@ -45,7 +45,7 @@ def AutoReplyScript():
     tab = Tab(
         name="Auto Reply",
         title="Auto Reply Configuration", 
-        icon="mail",
+        icon="message-circle",
         gap=4
     )
 
@@ -69,7 +69,7 @@ def AutoReplyScript():
     channel_input = add_card.create_ui_element(UI.Input, label="Channel ID", placeholder="123456789012345678")
     delay_trigger_input = add_card.create_ui_element(UI.Input, label="Delay (seconds)", placeholder="10")
     fuzzy_toggle = add_card.create_ui_element(UI.Toggle, label="Fuzzy Match (contains phrase)")
-    blacklist_input = add_card.create_ui_element(UI.Input, label="Ignore if contains (optional)", placeholder="stop, ignore, no")
+    blacklist_input = add_card.create_ui_element(UI.Input, label="Ignore if contains (optional)", placeholder="Enter / for none")
     add_btn = add_card.create_ui_element(UI.Button, label="Add Trigger", variant="cta")
 
     status_card = main_container.create_card(gap=3)
@@ -211,7 +211,7 @@ def AutoReplyScript():
             "fuzzy_match": fuzzy
         }
         
-        if blacklist:
+        if blacklist and blacklist != "/":
             new_trigger["blacklist"] = blacklist
         
         config["triggers"].append(new_trigger)
