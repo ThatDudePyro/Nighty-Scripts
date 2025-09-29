@@ -185,7 +185,7 @@ def AutoReplyScript():
         blacklist = blacklist_input.value.strip()
 
         if not all([trigger_msg, reply_msg, channel_id, delay]):
-            tab.toast(type="ERROR", title="Missing Information", description="Fill all fields")
+            tab.toast(type="ERROR", title="Missing Information", description="Fill trigger, reply, channel ID, and delay")
             return
 
         try:
@@ -280,7 +280,7 @@ def AutoReplyScript():
                     await asyncio.sleep(delay)
                 
                 try:
-                    await message.channel.send(trigger["reply_message"])
+                    await message.reply(trigger["reply_message"])
                     if config.get("notify_on_send", True):
                         print(f"Auto Reply | Sent: '{trigger['reply_message']}'", type_="INFO")
                 except Exception as e:
