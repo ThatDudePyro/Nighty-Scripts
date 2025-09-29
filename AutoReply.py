@@ -184,7 +184,7 @@ def AutoReplyScript():
         fuzzy = fuzzy_toggle.checked
         blacklist = blacklist_input.value.strip()
 
-        if not all([trigger_msg, reply_msg, channel_id, delay]):
+        if not trigger_msg or not reply_msg or not channel_id or not delay:
             tab.toast(type="ERROR", title="Missing Information", description="Fill trigger, reply, channel ID, and delay")
             return
 
