@@ -280,7 +280,7 @@ def AutoReplyScript():
                     await asyncio.sleep(delay)
                 
                 try:
-                    await message.reply(trigger["reply_message"])
+                    await message.channel.send(trigger["reply_message"])
                     if config.get("notify_on_send", True):
                         print(f"Auto Reply | Sent: '{trigger['reply_message']}'", type_="INFO")
                 except Exception as e:
