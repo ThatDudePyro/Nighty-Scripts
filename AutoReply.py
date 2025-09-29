@@ -45,7 +45,7 @@ def AutoReplyScript():
     tab = Tab(
         name="Auto Reply",
         title="Auto Reply Configuration", 
-        icon="fire",
+        icon="mail",
         gap=4
     )
 
