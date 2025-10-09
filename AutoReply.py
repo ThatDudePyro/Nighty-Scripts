@@ -3,6 +3,7 @@ import asyncio
 from pathlib import Path
 
 def AutoReplyScript():
+    
     BASE_DIR = Path(getScriptsPath()) / "json"
     CONFIG_FILE = BASE_DIR / "auto_reply_config.json"
 
@@ -61,15 +62,21 @@ def AutoReplyScript():
     delay_input = settings_card.create_ui_element(UI.Input, label="Default Delay", placeholder="10", value="10")
     save_btn = settings_card.create_ui_element(UI.Button, label="Save Settings", variant="cta")
 
-    add_card = top_container.create_card(gap=3)
+    add_card = top_container.create_card(gap=2)
     add_card.create_ui_element(UI.Text, content="Add Trigger", size="xl", weight="bold")
     
-    trigger_input = add_card.create_ui_element(UI.Input, label="Trigger Message", placeholder="Hello bot")
-    reply_input = add_card.create_ui_element(UI.Input, label="Reply Message", placeholder="Hi there!")
-    channel_input = add_card.create_ui_element(UI.Input, label="Channel ID", placeholder="123456789012345678")
-    delay_trigger_input = add_card.create_ui_element(UI.Input, label="Delay (seconds)", placeholder="10")
-    fuzzy_toggle = add_card.create_ui_element(UI.Toggle, label="Fuzzy Match (contains phrase)")
-    blacklist_input = add_card.create_ui_element(UI.Input, label="Ignore if contains (optional)", placeholder="Enter / for none")
+    add_row1 = add_card.create_group(type="columns", gap=3, full_width=True)
+    trigger_input = add_row1.create_ui_element(UI.Input, label="Trigger Message", placeholder="Hello bot")
+    delay_trigger_input = add_row1.create_ui_element(UI.Input, label="Delay (seconds)", placeholder="10")
+    
+    add_row2 = add_card.create_group(type="columns", gap=3, full_width=True)
+    reply_input = add_row2.create_ui_element(UI.Input, label="Reply Message", placeholder="Hi there!")
+    blacklist_input = add_row2.create_ui_element(UI.Input, label="Ignore if contains (optional)", placeholder="Enter / for none")
+    
+    add_row3 = add_card.create_group(type="columns", gap=3, full_width=True)
+    channel_input = add_row3.create_ui_element(UI.Input, label="Channel ID", placeholder="123456789012345678")
+    fuzzy_toggle = add_row3.create_ui_element(UI.Toggle, label="Fuzzy Match (contains phrase)")
+    
     add_btn = add_card.create_ui_element(UI.Button, label="Add Trigger", variant="cta")
 
     status_card = main_container.create_card(gap=3)
