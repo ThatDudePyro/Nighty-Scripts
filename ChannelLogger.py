@@ -3,8 +3,6 @@ import asyncio
 import requests
 from pathlib import Path
 from datetime import datetime
-
-def ChannelLogger():
     
     BASE_DIR = Path(getScriptsPath()) / "json"
     CONFIG_FILE = BASE_DIR / "ChannelLogger.json"
@@ -617,5 +615,3 @@ def ChannelLogger():
     refresh_channels()
 
     tab.render()
-
-ChannelLogger()
