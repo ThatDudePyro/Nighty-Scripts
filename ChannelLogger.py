@@ -95,12 +95,17 @@ def ChannelLogger():
             return False
 
     def send_webhook_message(webhook_url, content=None, embed_data=None, username=None, avatar_url=None):
-        if not webhook_url: return False
+        if not webhook_url:
+            return False
         payload = {}
-        if content: payload["content"] = content
-        if embed_data: payload["embeds"] = [embed_data]
-        if username: payload["username"] = username
-        if avatar_url: payload["avatar_url"] = avatar_url
+        if content:
+            payload["content"] = content
+        if embed_data:
+            payload["embeds"] = [embed_data]
+        if username:
+            payload["username"] = username
+        if avatar_url:
+            payload["avatar_url"] = avatar_url
         headers = {"Content-Type": "application/json"}
         try:
             response = requests.post(webhook_url, headers=headers, data=json.dumps(payload), timeout=10)
@@ -110,20 +115,9 @@ def ChannelLogger():
             print(f"Channel Logger | Webhook error: {e}", type_="ERROR")
             return False
 
-    def extract_media_urls(text):
-        if not text: return []
-        url_pattern = r'(https?://[^\s<>"{}|\\^`\[\]]+\.(?:jpg|jpeg|png|gif|webp|bmp))'
-        matches = re.findall(url_pattern, text, re.IGNORECASE)
-        seen = set()
-        out = []
-        for m in matches:
-            if m not in seen:
-                seen.add(m)
-                out.append(m)
-        return out
-
     def extract_all_urls(text):
-        if not text: return []
+        if not text:
+            return []
         url_pattern = r'(https?://[^\s<>"{}|\\^`\[\]]+)'
         matches = re.findall(url_pattern, text)
         seen = set()
@@ -135,7 +129,6 @@ def ChannelLogger():
                 out.append(m)
         return out
 
-    # ======================== UI START ========================
     tab = Tab(name="Channel Logger", title="Channel Logger Configuration", icon="message", gap=3)
     main_container = tab.create_container(type="rows", gap=3)
     top_row = main_container.create_container(type="columns", gap=3)
@@ -187,7 +180,6 @@ def ChannelLogger():
     channels_display = manage_card.create_group(type="rows", gap=1)
     remove_select = manage_card.create_ui_element(UI.Select, label="Remove Channel", items=[{"id": "", "title": "No channels"}], mode="single", full_width=True)
     remove_btn = manage_card.create_ui_element(UI.Button, label="Remove", variant="flat", full_width=True)
-    # ======================== UI END ========================
 
     channel_text_elements = []
 
@@ -233,7 +225,7 @@ def ChannelLogger():
             try:
                 dest_channel = bot.get_channel(int(dest_id))
                 server_name = dest_channel.guild.name if dest_channel.guild else "DM"
-                dest_status_text.content = f"✓ {server_name} → #{dest_channel.name}"
+                dest_status_text.content = f"Logging to {server_name} -> #{dest_channel.name}"
                 dest_status_text.color = "#4ade80"
             except:
                 dest_status_text.content = "Invalid channel"
@@ -247,10 +239,10 @@ def ChannelLogger():
                 try:
                     discord_channel = bot.get_channel(int(channel))
                     server_name = discord_channel.guild.name if discord_channel.guild else "DM"
-                    channel_name = f"{server_name} → #{discord_channel.name}"
+                    channel_name = f"{server_name} -> #{discord_channel.name}"
                 except:
                     channel_name = f"Channel {channel}"
-                items.append({"id": str(i), "title": f"{channel_name}"})
+                items.append({"id": str(i), "title": channel_name})
             remove_select.items = items
         else:
             remove_select.items = [{"id": "", "title": "No channels"}]
@@ -266,7 +258,7 @@ def ChannelLogger():
                 try:
                     discord_channel = bot.get_channel(int(channel_id))
                     server_name = discord_channel.guild.name if discord_channel.guild else "DM"
-                    channel_display = f"• {server_name} → #{discord_channel.name}"
+                    channel_display = f"• {server_name} -> #{discord_channel.name}"
                 except:
                     channel_display = f"• {channel_id}"
                 text_element = channels_display.create_ui_element(UI.Text, content=channel_display, size="sm")
@@ -377,26 +369,27 @@ def ChannelLogger():
 
         content_text = message.content or ""
         inline_urls = extract_all_urls(content_text)
-        media_inline = [u for u in inline_urls if re.search(r'\.(?:jpg|jpeg|png|gif|webp|bmp)$', u, re.IGNORECASE)]
-        non_media_inline = [u for u in inline_urls if u not in media_inline]
-
         attachments = [att.url for att in message.attachments] if message.attachments else []
         links_to_send = []
         for u in inline_urls: 
-            if u not in links_to_send: links_to_send.append(u)
+            if u not in links_to_send:
+                links_to_send.append(u)
         for a in attachments: 
-            if a not in links_to_send: links_to_send.append(a)
+            if a not in links_to_send:
+                links_to_send.append(a)
 
         media_urls = [u for u in links_to_send if re.search(r'\.(?:jpg|jpeg|png|gif|webp|bmp)$', u, re.IGNORECASE)]
         other_links = [u for u in links_to_send if u not in media_urls]
 
         cleaned_content = content_text
         if links_to_send and cleaned_content:
-            for l in links_to_send: cleaned_content = cleaned_content.replace(l, "")
+            for l in links_to_send:
+                cleaned_content = cleaned_content.replace(l, "")
             cleaned_content = re.sub(r'\s+\n', '\n', cleaned_content)
             cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content)
             cleaned_content = cleaned_content.strip()
-            if not cleaned_content: cleaned_content = None
+            if not cleaned_content:
+                cleaned_content = None
         else:
             cleaned_content = cleaned_content if cleaned_content else None
 
@@ -435,8 +428,31 @@ def ChannelLogger():
             if media_urls:
                 for media in media_urls:
                     await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=media, embed_data=None, username=server_name, avatar_url=avatar_url)
+            
+            if message.embeds:
+                for original_embed in message.embeds:
+                    embed_dict = original_embed.to_dict()
+                    logged_embed = {"color": embed_dict.get("color", theme_color), "timestamp": datetime.utcnow().isoformat()}
+                    if embed_dict.get("title"):
+                        logged_embed["title"] = "Embed: " + embed_dict["title"]
+                    else:
+                        logged_embed["title"] = "Embedded Content"
+                    if embed_dict.get("description"):
+                        logged_embed["description"] = embed_dict["description"][:2000]
+                    if embed_dict.get("author"):
+                        logged_embed["author"] = embed_dict["author"]
+                    if embed_dict.get("fields"):
+                        logged_embed["fields"] = embed_dict["fields"]
+                    if embed_dict.get("footer"):
+                        logged_embed["footer"] = embed_dict["footer"]
+                    if embed_dict.get("thumbnail"):
+                        logged_embed["thumbnail"] = embed_dict["thumbnail"]
+                    if embed_dict.get("image"):
+                        logged_embed["image"] = embed_dict["image"]
+                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=None, embed_data=logged_embed, username=server_name, avatar_url=avatar_url)
+            
             await run_in_thread(delete_webhook, webhook_id, webhook_token)
-            if (config.get("notify_on_log", True)):
+            if config.get("notify_on_log", True):
                 print(f"Channel Logger | Logged message from {message.author.name} in #{channel_name} ({server_name})", type_="INFO")
         except Exception as e:
             print(f"Channel Logger | Error logging message: {e}", type_="ERROR")
