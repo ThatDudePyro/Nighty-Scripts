@@ -2,7 +2,7 @@ import json
 import asyncio
 from pathlib import Path
 
-def AutoReplyScript():
+def AutoReply():
     
     BASE_DIR = Path(getScriptsPath()) / "json"
     CONFIG_FILE = BASE_DIR / "auto_reply_config.json"
@@ -42,7 +42,7 @@ def AutoReplyScript():
             print(f"Auto Reply | Error saving config: {e}", type_="ERROR")
             return False
 
-    # --- UI SETUP ---
+    # ======================== UI START ========================
     tab = Tab(
         name="Auto Reply",
         title="Auto Reply Configuration", 
@@ -73,9 +73,34 @@ def AutoReplyScript():
     reply_input = add_row2.create_ui_element(UI.Input, label="Reply Message", placeholder="Hi there!")
     blacklist_input = add_row2.create_ui_element(UI.Input, label="Ignore if contains (optional)", placeholder="Enter / for none")
     
+    servers_list = [{"id": "select_server", "title": "Select server"}]
+    for server in bot.guilds:
+        servers_list.append({
+            "id": str(server.id), 
+            "title": server.name, 
+            "iconUrl": server.icon.url if server.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
+        })
+    
     add_row3 = add_card.create_group(type="columns", gap=3, full_width=True)
-    channel_input = add_row3.create_ui_element(UI.Input, label="Channel ID", placeholder="123456789012345678")
-    fuzzy_toggle = add_row3.create_ui_element(UI.Toggle, label="Fuzzy Match (contains phrase)")
+    server_select = add_row3.create_ui_element(
+        UI.Select,
+        label="Server",
+        items=servers_list,
+        disabled_items=["select_server"],
+        mode="single",
+        full_width=True
+    )
+    channel_select = add_row3.create_ui_element(
+        UI.Select,
+        label="Channel",
+        items=[{"id": "select_channel", "title": "Select server first"}],
+        disabled_items=["select_channel"],
+        mode="single",
+        full_width=True
+    )
+    
+    add_row4 = add_card.create_group(type="columns", gap=3, full_width=True)
+    fuzzy_toggle = add_row4.create_ui_element(UI.Toggle, label="Fuzzy Match (contains phrase)")
     
     add_btn = add_card.create_ui_element(UI.Button, label="Add Trigger", variant="cta")
 
@@ -87,7 +112,6 @@ def AutoReplyScript():
     count_text = status_row.create_ui_element(UI.Text, content="0 triggers", size="base", color="#6b7280")
     
     status_card.create_ui_element(UI.Text, content="Current Triggers:", size="lg", weight="bold")
-    
     triggers_display = status_card.create_group(type="rows", gap=1)
     
     remove_select = status_card.create_ui_element(UI.Select,
@@ -96,12 +120,33 @@ def AutoReplyScript():
         mode="single"
     )
     remove_btn = status_card.create_ui_element(UI.Button, label="Remove Selected Trigger", variant="flat")
-    # --- END UI SETUP ---
+    # ======================== UI END ========================
 
     trigger_text_elements = []
     
     def fuzzy_match(message, trigger_phrase):
         return trigger_phrase.lower() in message.lower()
+    
+    def update_channel_list(selected_server_ids):
+        if not selected_server_ids or selected_server_ids[0] in ["", "select_server"]:
+            channel_select.items = [{"id": "select_channel", "title": "Select server first"}]
+            return
+        
+        try:
+            server_id = int(selected_server_ids[0])
+            server = bot.get_guild(server_id)
+            if not server:
+                channel_select.items = [{"id": "select_channel", "title": "Server not found"}]
+                return
+            
+            channels_list = [{"id": "select_channel", "title": "Select a channel"}]
+            for channel in server.text_channels:
+                channels_list.append({"id": str(channel.id), "title": f"#{channel.name}"})
+            
+            channel_select.items = channels_list
+        except Exception as e:
+            print(f"Auto Reply | Error updating channels: {e}", type_="ERROR")
+            channel_select.items = [{"id": "select_channel", "title": "Error loading channels"}]
     
     def update_display():
         config = load_config()
@@ -117,9 +162,20 @@ def AutoReplyScript():
             for i, trigger in enumerate(config["triggers"]):
                 match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
                 blacklist_info = f" | Ignores: {trigger['blacklist']}" if trigger.get("blacklist") else ""
+                
+                try:
+                    discord_channel = bot.get_channel(int(trigger['channel_id']))
+                    if discord_channel:
+                        server_name = discord_channel.guild.name if discord_channel.guild else "DM"
+                        channel_name = f"{server_name} → #{discord_channel.name}"
+                    else:
+                        channel_name = f"Channel {trigger['channel_id']}"
+                except:
+                    channel_name = f"Channel {trigger['channel_id']}"
+                
                 items.append({
                     "id": str(i),
-                    "title": f"{i+1}. '{trigger['trigger_message']}' → '{trigger['reply_message']}' ({match_type}{blacklist_info})"
+                    "title": f"'{trigger['trigger_message']}' → '{trigger['reply_message']}' | {channel_name} ({match_type}{blacklist_info})"
                 })
             remove_select.items = items
         else:
@@ -136,7 +192,18 @@ def AutoReplyScript():
             for i, trigger in enumerate(config["triggers"]):
                 match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
                 blacklist_info = f" | Ignores: {trigger['blacklist']}" if trigger.get("blacklist") else ""
-                text = f"{i+1}. '{trigger['trigger_message']}' → '{trigger['reply_message']}' (Ch: {trigger['channel_id']}, {match_type}{blacklist_info})"
+                
+                try:
+                    discord_channel = bot.get_channel(int(trigger['channel_id']))
+                    if discord_channel:
+                        server_name = discord_channel.guild.name if discord_channel.guild else "DM"
+                        channel_display = f"{server_name} → #{discord_channel.name}"
+                    else:
+                        channel_display = f"Channel {trigger['channel_id']}"
+                except:
+                    channel_display = f"Channel {trigger['channel_id']}"
+                
+                text = f"{i+1}. '{trigger['trigger_message']}' → '{trigger['reply_message']}' | {channel_display} ({match_type}{blacklist_info})"
                 text_element = triggers_display.create_ui_element(UI.Text, content=text, size="sm")
                 trigger_text_elements.append(text_element)
         else:
@@ -186,20 +253,24 @@ def AutoReplyScript():
     async def add_trigger():
         trigger_msg = trigger_input.value.strip()
         reply_msg = reply_input.value.strip()
-        channel_id = channel_input.value.strip()
         delay = delay_trigger_input.value.strip()
         fuzzy = fuzzy_toggle.checked
         blacklist = blacklist_input.value.strip()
 
-        if not trigger_msg or not reply_msg or not channel_id or not delay:
-            tab.toast(type="ERROR", title="Missing Information", description="Fill trigger, reply, channel ID, and delay")
+        if not channel_select.selected_items or channel_select.selected_items[0] in ["", "select_channel"]:
+            tab.toast(type="ERROR", title="No Channel Selected", description="Please select a channel")
+            return
+
+        channel_id = channel_select.selected_items[0]
+
+        if not trigger_msg or not reply_msg or not delay:
+            tab.toast(type="ERROR", title="Missing Information", description="Fill trigger, reply, and delay")
             return
 
         try:
-            int(channel_id)
             delay_num = max(0, int(delay))
         except ValueError:
-            tab.toast(type="ERROR", title="Invalid Input", description="Channel ID and delay must be numbers")
+            tab.toast(type="ERROR", title="Invalid Input", description="Delay must be a number")
             return
 
         config = load_config()
@@ -226,21 +297,28 @@ def AutoReplyScript():
         if save_config(config):
             trigger_input.value = ""
             reply_input.value = ""
-            channel_input.value = ""
             delay_trigger_input.value = ""
             fuzzy_toggle.checked = False
             blacklist_input.value = ""
             
             refresh_triggers()
+            
+            try:
+                discord_channel = bot.get_channel(int(channel_id))
+                channel_name = f"#{discord_channel.name}" if discord_channel else channel_id
+            except:
+                channel_name = channel_id
+            
             match_type = "Fuzzy" if fuzzy else "Exact"
             blacklist_info = f" with blacklist: {blacklist}" if blacklist else ""
-            tab.toast(type="SUCCESS", title="Trigger Added", description=f"Added: '{trigger_msg}' ({match_type}{blacklist_info})")
+            tab.toast(type="SUCCESS", title="Trigger Added", description=f"Added: '{trigger_msg}' in {channel_name} ({match_type}{blacklist_info})")
         else:
             tab.toast(type="ERROR", title="Save Failed", description="Failed to save trigger")
 
     save_btn.onClick = save_settings
     add_btn.onClick = add_trigger
     remove_btn.onClick = remove_selected_trigger
+    server_select.onChange = update_channel_list
 
     @bot.listen('on_message')
     async def handle_auto_reply(message):
@@ -304,4 +382,4 @@ def AutoReplyScript():
 
     tab.render()
 
-AutoReplyScript()
+AutoReply()
