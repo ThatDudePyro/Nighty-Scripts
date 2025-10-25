@@ -3,7 +3,6 @@ import os
 import json
 
 def channel_locker_logic():
-    # File path
     perm_file_path = os.path.expandvars(
         "%APPDATA%\\Nighty Selfbot\\data\\scripts\\json\\lockperms.json"
     )

@@ -8,12 +8,10 @@ def lyrics():
     from pathlib import Path
     from typing import Dict, List, Tuple, Optional, Any
 
-    # Config file path
     CONFIG_PATH = Path(os.path.expandvars(r"%APPDATA%\Nighty Selfbot\data\scripts\json\LyricsConfig.json"))
 
-    # Cache for API responses (persistent file-based)
     lyrics_cache: Dict[str, Dict[str, Any]] = {}
-    CACHE_EXPIRY = 2592000  # 30 days in seconds (30 * 24 * 60 * 60)
+    CACHE_EXPIRY = 2592000
     CACHE_FILE = CONFIG_PATH.parent / "LyricsCache.json"
 
     def load_cache() -> Dict[str, Any]:
@@ -23,7 +21,6 @@ def lyrics():
             if CACHE_FILE.exists():
                 with open(CACHE_FILE, 'r', encoding='utf-8') as f:
                     lyrics_cache = json.load(f)
-                    # Clean expired entries on load
                     current_time = time.time()
                     lyrics_cache = {k: v for k, v in lyrics_cache.items() 
                                   if current_time - v.get("timestamp", 0) < CACHE_EXPIRY}
@@ -51,7 +48,6 @@ def lyrics():
             if CONFIG_PATH.exists():
                 with open(CONFIG_PATH, "r", encoding='utf-8') as f:
                     config = json.load(f)
-                    # Validate config structure
                     required_keys = {"genius_key", "use_fallback"}
                     for key in required_keys:
                         if key not in config:
@@ -80,16 +76,13 @@ def lyrics():
             }
 
     def save_config(config: Dict[str, Any]) -> bool:
-        """Save configuration to JSON file with atomic write."""
         try:
             CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
             
-            # Atomic write using temporary file
             temp_path = CONFIG_PATH.with_suffix('.tmp')
             with open(temp_path, "w", encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
             
-            # Replace original file
             temp_path.replace(CONFIG_PATH)
             return True
         except Exception as e:
@@ -106,7 +99,6 @@ def lyrics():
         config = load_config()
         print(f"{key}, {value}")
         
-        # Validate certain config values
         if not isinstance(value,str):
          if key == "timeout" and not isinstance(value, (int, float)) or value <= 0:
             print(f"Invalid timeout value: {value}", type_="ERROR")
@@ -126,13 +118,12 @@ def lyrics():
         if not title:
             return ""
         
-        # Remove common suffixes and prefixes
-        title = re.sub(r'\s*\(.*?\)\s*', ' ', title)  # Remove parentheses content
-        title = re.sub(r'\s*\[.*?\]\s*', ' ', title)  # Remove bracket content
+        title = re.sub(r'\s*\(.*?\)\s*', ' ', title)
+        title = re.sub(r'\s*\[.*?\]\s*', ' ', title) 
         title = re.sub(r'\s*-\s*(feat|ft|featuring).*', '', title, flags=re.IGNORECASE)
         title = re.sub(r'\s*-\s*remaster.*', '', title, flags=re.IGNORECASE)
         title = re.sub(r'\s*-\s*radio edit.*', '', title, flags=re.IGNORECASE)
-        title = re.sub(r'\s+', ' ', title).strip()  # Normalize whitespace
+        title = re.sub(r'\s+', ' ', title).strip()
         
         return title
 
@@ -156,7 +147,7 @@ def lyrics():
                             return False, "Access forbidden"
                         elif resp.status == 429:
                             if attempt < max_retries - 1:
-                                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                                await asyncio.sleep(2 ** attempt)
                                 continue
                             return False, "Rate limited"
                         else:
@@ -183,13 +174,11 @@ def lyrics():
         if str1 == str2:
             return 100.0
         
-        # Check for substring matches
         if str1 in str2 or str2 in str1:
             shorter = min(len(str1), len(str2))
             longer = max(len(str1), len(str2))
             return min(95.0, (shorter / longer) * 100)
         
-        # Word-based similarity
         words1 = set(str1.split())
         words2 = set(str2.split())
         
@@ -200,7 +189,6 @@ def lyrics():
         union = len(words1.union(words2))
         jaccard = intersection / union
         
-        # Bonus for partial word matches
         partial_matches = 0
         for w1 in words1:
             for w2 in words2:
@@ -218,7 +206,6 @@ def lyrics():
         if not hits:
             return None, 0.0
         
-        # Clean the input for better matching
         clean_title = clean_song_title(song_title)
         clean_artist = artist_name.strip() if artist_name else ""
         
@@ -228,25 +215,22 @@ def lyrics():
         
         print(f"Searching for: '{clean_title}' by '{clean_artist}'", type_="INFO")
         
-        for i, hit in enumerate(hits[:10]):  # Check more results
+        for i, hit in enumerate(hits[:10]):
             result = hit.get("result", {})
             genius_title = result.get("title", "")
             genius_artist = result.get("primary_artist", {}).get("name", "")
             
-            # Clean genius data for comparison
             clean_genius_title = clean_song_title(genius_title)
             
             title_score = calculate_similarity(clean_title, clean_genius_title)
             artist_score = calculate_similarity(clean_artist, genius_artist) if clean_artist else 50.0
             
-            # Weight title more heavily than artist
             combined_score = (title_score * 0.75) + (artist_score * 0.25)
             
             if combined_score > best_score and combined_score >= match_threshold:
                 best_score = combined_score
                 best_match = result
         
-        # Only print the best match found (if any)
         if best_match:
             genius_title = best_match.get("title", "")
             genius_artist = best_match.get("primary_artist", {}).get("name", "")
@@ -269,7 +253,6 @@ def lyrics():
         if not get_config_value("cache_enabled", True):
             return None
         
-        # Ensure cache is loaded
         if not lyrics_cache:
             load_cache()
         
@@ -292,7 +275,6 @@ def lyrics():
             "artist": artist
         }
         
-        # Clean old cache entries (keep only last 500 instead of 100)
         if len(lyrics_cache) > 500:
             oldest_keys = sorted(lyrics_cache.keys(), 
                                key=lambda k: lyrics_cache[k]["timestamp"])[:50]
@@ -300,7 +282,6 @@ def lyrics():
                 del lyrics_cache[key]
             print(f"Cleaned {len(oldest_keys)} old cache entries", type_="INFO")
         
-        # Save to disk
         save_cache()
 
     async def fetch_lyrics(bot) -> str:
@@ -320,7 +301,6 @@ def lyrics():
 
             display_info = f"**`{song}`**" + (f" by **`{artist}`**" if artist else "")
 
-            # Check cache first
             cached_result = get_from_cache(song, artist)
             if cached_result:
                 return cached_result
@@ -329,13 +309,11 @@ def lyrics():
             
             if genius_key:
                 try:
-                    # Clean search query for better results
                     clean_title = clean_song_title(song)
                     search_query = clean_title
                     if artist:
                         search_query += f" {artist}"
                     
-                    # URL encode properly
                     search_query = search_query.replace(' ', '%20').replace('&', '%26').replace('#', '%23')
                     search_url = f"https://api.genius.com/search?q={search_query}"
                     
@@ -383,7 +361,7 @@ def lyrics():
                                         return f"# Rate limited - try again later"
                                     else:
                                         return f"# Genius API error: HTTP {resp.status}"
-                            break  # Success, exit retry loop
+                            break 
                         except asyncio.TimeoutError:
                             if attempt < max_retries - 1:
                                 continue
@@ -443,7 +421,6 @@ def lyrics():
             song = ctx.bot.config.get("spotify_song", "Not found") if bot_has_config else "No config"
             artist = ctx.bot.config.get("spotify_artist", "Not found") if bot_has_config else "No config"
             
-            # Ensure cache is loaded for accurate count
             if cache_enabled and not lyrics_cache:
                 load_cache()
             
@@ -479,7 +456,6 @@ def lyrics():
         
         elif subcommand == "clearcache":
             lyrics_cache.clear()
-            # Also delete the cache file
             try:
                 if CACHE_FILE.exists():
                     CACHE_FILE.unlink()
@@ -538,7 +514,6 @@ def lyrics():
             if is_valid:
                 if set_config_value("genius_key", api_key):
                     await msg.edit(content="# ✅ Genius API key saved and validated successfully!")
-                    # Clear cache when API key changes
                     lyrics_cache.clear()
                 else:
                     await msg.edit(content="# ❌ Failed to save API key to config file")
@@ -555,7 +530,6 @@ def lyrics():
             timeout = config.get("timeout", 15)
             max_retries = config.get("max_retries", 3)
             
-            # Ensure cache is loaded for accurate count  
             if cache_enabled and not lyrics_cache:
                 load_cache()
             
@@ -604,7 +578,6 @@ def lyrics():
                 print(f"Error in lyrics command: {e}", type_="ERROR")
                 await ctx.send(f"# Command error: {str(e)}")
 
-    # Load cache on script startup
     load_cache()
 
     print("Enhanced Lyrics script loaded successfully", type_="SUCCESS")
