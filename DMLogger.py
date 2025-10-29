@@ -93,12 +93,17 @@ def DMLogger():
             return False
 
     def send_webhook_message(webhook_url, content=None, embed_data=None, username=None, avatar_url=None):
-        if not webhook_url: return False
+        if not webhook_url:
+            return False
         payload = {}
-        if content: payload["content"] = content
-        if embed_data: payload["embeds"] = [embed_data]
-        if username: payload["username"] = username
-        if avatar_url: payload["avatar_url"] = avatar_url
+        if content:
+            payload["content"] = content
+        if embed_data:
+            payload["embeds"] = [embed_data]
+        if username:
+            payload["username"] = username
+        if avatar_url:
+            payload["avatar_url"] = avatar_url
         headers = {"Content-Type": "application/json"}
         try:
             response = requests.post(webhook_url, headers=headers, data=json.dumps(payload), timeout=10)
@@ -109,7 +114,8 @@ def DMLogger():
             return False
 
     def extract_all_urls(text):
-        if not text: return []
+        if not text:
+            return []
         url_pattern = r'(https?://[^\s<>"{}|\\^`\[\]]+)'
         matches = re.findall(url_pattern, text)
         seen = set()
@@ -121,7 +127,6 @@ def DMLogger():
                 out.append(m)
         return out
 
-    # ======================== UI START ========================
     tab = Tab(name="DM Logger", title="DM Logger Configuration", icon="message", gap=3)
     main_container = tab.create_container(type="rows", gap=3)
     top_row = main_container.create_container(type="columns", gap=3)
@@ -149,7 +154,6 @@ def DMLogger():
     dest_channel_select = dest_card.create_ui_element(UI.Select, label="Channel", items=[{"id": "select_channel", "title": "Select server first"}], disabled_items=["select_channel"], mode="single", full_width=True)
     dest_status_text = dest_card.create_ui_element(UI.Text, content="No destination set", size="sm", color="#f87171")
     save_destination_btn = dest_card.create_ui_element(UI.Button, label="Save Destination", variant="cta", full_width=True)
-    # ======================== UI END ========================
 
     def update_dest_channel_list(selected_server_ids):
         if not selected_server_ids or selected_server_ids[0] in ["", "select_server"]:
@@ -158,6 +162,9 @@ def DMLogger():
         try:
             server_id = int(selected_server_ids[0])
             server = bot.get_guild(server_id)
+            if not server:
+                dest_channel_select.items = [{"id": "select_channel", "title": "Server not found"}]
+                return
             channels_list = [{"id": "select_channel", "title": "Select a channel"}]
             for channel in server.text_channels:
                 channels_list.append({"id": str(channel.id), "title": f"#{channel.name}"})
@@ -166,6 +173,26 @@ def DMLogger():
             print(f"DM Logger | Error updating destination channels: {e}", type_="ERROR")
             dest_channel_select.items = [{"id": "select_channel", "title": "Error loading channels"}]
 
+    def update_status_display():
+        config = load_config()
+        dest_id = config.get("destination_channel_id")
+        if dest_id:
+            try:
+                dest_channel = bot.get_channel(int(dest_id))
+                if dest_channel:
+                    server_name = dest_channel.guild.name if dest_channel.guild else "DM"
+                    dest_status_text.content = f"Logging to {server_name} -> #{dest_channel.name}"
+                    dest_status_text.color = "#4ade80"
+                else:
+                    dest_status_text.content = "Channel not found"
+                    dest_status_text.color = "#f87171"
+            except:
+                dest_status_text.content = "Invalid channel"
+                dest_status_text.color = "#f87171"
+        else:
+            dest_status_text.content = "No destination set"
+            dest_status_text.color = "#f87171"
+
     async def save_settings():
         config = load_config()
         config["enabled"] = enable_toggle.checked
@@ -173,6 +200,7 @@ def DMLogger():
         config["notify_on_log"] = notify_toggle.checked
         config["ping_on_log"] = ping_toggle.checked
         if save_config(config):
+            update_status_display()
             tab.toast(type="SUCCESS", title="Settings Saved")
         else:
             tab.toast(type="ERROR", title="Save Failed")
@@ -193,9 +221,9 @@ def DMLogger():
         config = load_config()
         config["destination_channel_id"] = channel_id
         if save_config(config):
-            dest_status_text.content = f"✓ #{discord_channel.name}"
-            dest_status_text.color = "#4ade80"
-            tab.toast(type="SUCCESS", title="Destination Set", description=f"Logs will be sent to #{discord_channel.name}")
+            update_status_display()
+            channel_name = f"#{discord_channel.name}" if discord_channel else channel_id
+            tab.toast(type="SUCCESS", title="Destination Set", description=f"Logs will be sent to {channel_name}")
         else:
             tab.toast(type="ERROR", title="Save Failed")
 
@@ -217,23 +245,27 @@ def DMLogger():
 
         content_text = message.content or ""
         inline_urls = extract_all_urls(content_text)
-        attachments = [att.url for att in getattr(message, "attachments", [])] if getattr(message, "attachments", None) else []
+        attachments = [att.url for att in message.attachments] if message.attachments else []
 
         links_to_send = []
         for u in inline_urls: 
-            if u not in links_to_send: links_to_send.append(u)
+            if u not in links_to_send:
+                links_to_send.append(u)
         for a in attachments: 
-            if a not in links_to_send: links_to_send.append(a)
+            if a not in links_to_send:
+                links_to_send.append(a)
 
         media_urls = [u for u in links_to_send if re.search(r'\.(?:jpg|jpeg|png|gif|webp|bmp)$', u, re.IGNORECASE)]
         other_links = [u for u in links_to_send if u not in media_urls]
 
         cleaned_content = content_text
         if links_to_send and cleaned_content:
-            for l in links_to_send: cleaned_content = cleaned_content.replace(l, "")
+            for l in links_to_send:
+                cleaned_content = cleaned_content.replace(l, "")
             cleaned_content = re.sub(r'\s+\n', '\n', cleaned_content)
             cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content).strip()
-            if not cleaned_content: cleaned_content = None
+            if not cleaned_content:
+                cleaned_content = None
         else:
             cleaned_content = cleaned_content if cleaned_content else None
 
@@ -252,7 +284,8 @@ def DMLogger():
 
         try:
             webhook_url, webhook_id = await run_in_thread(create_webhook, config["destination_channel_id"], f"DM {message.author.name}")
-            if not webhook_url: return
+            if not webhook_url:
+                return
             webhook_token = webhook_url.split('/')[-1]
             content_to_send = f"<@{bot.user.id}>" if config.get("ping_on_log", False) else None
 
@@ -260,6 +293,28 @@ def DMLogger():
             
             for link in other_links + media_urls:
                 await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=link, embed_data=None, username=message.author.name, avatar_url=str(message.author.avatar.url) if message.author.avatar else None)
+            
+            if message.embeds:
+                for original_embed in message.embeds:
+                    embed_dict = original_embed.to_dict()
+                    logged_embed = {"color": embed_dict.get("color", theme_color), "timestamp": datetime.utcnow().isoformat()}
+                    if embed_dict.get("title"):
+                        logged_embed["title"] = "Embed: " + embed_dict["title"]
+                    else:
+                        logged_embed["title"] = "Embedded Content"
+                    if embed_dict.get("description"):
+                        logged_embed["description"] = embed_dict["description"][:2000]
+                    if embed_dict.get("author"):
+                        logged_embed["author"] = embed_dict["author"]
+                    if embed_dict.get("fields"):
+                        logged_embed["fields"] = embed_dict["fields"]
+                    if embed_dict.get("footer"):
+                        logged_embed["footer"] = embed_dict["footer"]
+                    if embed_dict.get("thumbnail"):
+                        logged_embed["thumbnail"] = embed_dict["thumbnail"]
+                    if embed_dict.get("image"):
+                        logged_embed["image"] = embed_dict["image"]
+                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=None, embed_data=logged_embed, username=message.author.name, avatar_url=str(message.author.avatar.url) if message.author.avatar else None)
 
             await run_in_thread(delete_webhook, webhook_id, webhook_token)
             if config.get("notify_on_log", True):
@@ -273,6 +328,7 @@ def DMLogger():
     log_self_toggle.checked = config.get("log_self", False)
     notify_toggle.checked = config.get("notify_on_log", True)
     ping_toggle.checked = config.get("ping_on_log", False)
+    update_status_display()
     tab.render()
 
 DMLogger()
