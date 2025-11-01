@@ -1,4 +1,4 @@
-def lyrics():
+def SpotifyLyrics():
     import asyncio
     import aiohttp
     import json
@@ -99,16 +99,16 @@ def lyrics():
         config = load_config()
         print(f"{key}, {value}")
         
-        if not isinstance(value,str):
-         if key == "timeout" and not isinstance(value, (int, float)) or value <= 0:
-            print(f"Invalid timeout value: {value}", type_="ERROR")
-            return False
-         if key == "max_retries" and not isinstance(value, int) or value < 0:
-            print(f"Invalid max_retries value: {value}", type_="ERROR")
-            return False
-         if key == "match_threshold" and not isinstance(value, (int, float)) or not 0 <= value <= 100:
-            print(f"Invalid match_threshold value: {value}", type_="ERROR")
-            return False
+        if not isinstance(value, str):
+            if key == "timeout" and (not isinstance(value, (int, float)) or value <= 0):
+                print(f"Invalid timeout value: {value}", type_="ERROR")
+                return False
+            if key == "max_retries" and (not isinstance(value, int) or value < 0):
+                print(f"Invalid max_retries value: {value}", type_="ERROR")
+                return False
+            if key == "match_threshold" and (not isinstance(value, (int, float)) or not 0 <= value <= 100):
+                print(f"Invalid match_threshold value: {value}", type_="ERROR")
+                return False
         
         config[key] = value
         return save_config(config)
@@ -407,26 +407,26 @@ def lyrics():
         parts = args.split(maxsplit=2) if args else []
         subcommand = parts[0].lower() if parts else ""
         
-        elif subcommand == "help":
-    config = load_config()
-    genius_key = config.get("genius_key", "")
-    fallback = config.get("use_fallback", True)
-    cache_enabled = config.get("cache_enabled", True)
-    match_threshold = config.get("match_threshold", 25)
-    timeout = config.get("timeout", 15)
-    max_retries = config.get("max_retries", 3)
-    
-    bot_has_config = hasattr(ctx.bot, 'config')
-    bot_config_keys = list(ctx.bot.config.keys()) if bot_has_config else []
-    song = ctx.bot.config.get("spotify_song", "Not found") if bot_has_config else "No config"
-    artist = ctx.bot.config.get("spotify_artist", "Not found") if bot_has_config else "No config"
-    
-    if cache_enabled and not lyrics_cache:
-        load_cache()
-    
-    cache_info = f"{len(lyrics_cache)} entries" if cache_enabled else "Disabled"
-    
-    help_msg = f"""# **Lyrics Help & Configuration**
+        if subcommand == "help":
+            config = load_config()
+            genius_key = config.get("genius_key", "")
+            fallback = config.get("use_fallback", True)
+            cache_enabled = config.get("cache_enabled", True)
+            match_threshold = config.get("match_threshold", 25)
+            timeout = config.get("timeout", 15)
+            max_retries = config.get("max_retries", 3)
+            
+            bot_has_config = hasattr(ctx.bot, 'config')
+            bot_config_keys = list(ctx.bot.config.keys()) if bot_has_config else []
+            song = ctx.bot.config.get("spotify_song", "Not found") if bot_has_config else "No config"
+            artist = ctx.bot.config.get("spotify_artist", "Not found") if bot_has_config else "No config"
+            
+            if cache_enabled and not lyrics_cache:
+                load_cache()
+            
+            cache_info = f"{len(lyrics_cache)} entries" if cache_enabled else "Disabled"
+            
+            help_msg = f"""# **Lyrics Help & Configuration**
 
 ### **Configuration**
 **Config File:** `{CONFIG_PATH}`
@@ -459,8 +459,8 @@ def lyrics():
 
 *Get a free API key at:* <https://genius.com/api-clients>"""
 
-    await ctx.send(help_msg)
-    return
+            await ctx.send(help_msg)
+            return
         
         elif subcommand == "clearcache":
             lyrics_cache.clear()
@@ -551,4 +551,4 @@ def lyrics():
 
     load_cache()
 
-lyrics()
+SpotifyLyrics()
