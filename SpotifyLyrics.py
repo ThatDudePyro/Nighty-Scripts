@@ -407,52 +407,60 @@ def lyrics():
         parts = args.split(maxsplit=2) if args else []
         subcommand = parts[0].lower() if parts else ""
         
-        if subcommand == "debug":
-            config = load_config()
-            genius_key = config.get("genius_key", "")
-            fallback = config.get("use_fallback", True)
-            cache_enabled = config.get("cache_enabled", True)
-            match_threshold = config.get("match_threshold", 25)
-            timeout = config.get("timeout", 15)
-            max_retries = config.get("max_retries", 3)
-            
-            bot_has_config = hasattr(ctx.bot, 'config')
-            bot_config_keys = list(ctx.bot.config.keys()) if bot_has_config else []
-            song = ctx.bot.config.get("spotify_song", "Not found") if bot_has_config else "No config"
-            artist = ctx.bot.config.get("spotify_artist", "Not found") if bot_has_config else "No config"
-            
-            if cache_enabled and not lyrics_cache:
-                load_cache()
-            
-            cache_info = f"{len(lyrics_cache)} entries" if cache_enabled else "Disabled"
-            
-            debug_msg = f"""# **Lyrics Debug Information**
+        elif subcommand == "help":
+    config = load_config()
+    genius_key = config.get("genius_key", "")
+    fallback = config.get("use_fallback", True)
+    cache_enabled = config.get("cache_enabled", True)
+    match_threshold = config.get("match_threshold", 25)
+    timeout = config.get("timeout", 15)
+    max_retries = config.get("max_retries", 3)
+    
+    bot_has_config = hasattr(ctx.bot, 'config')
+    bot_config_keys = list(ctx.bot.config.keys()) if bot_has_config else []
+    song = ctx.bot.config.get("spotify_song", "Not found") if bot_has_config else "No config"
+    artist = ctx.bot.config.get("spotify_artist", "Not found") if bot_has_config else "No config"
+    
+    if cache_enabled and not lyrics_cache:
+        load_cache()
+    
+    cache_info = f"{len(lyrics_cache)} entries" if cache_enabled else "Disabled"
+    
+    help_msg = f"""# **Lyrics Help & Configuration**
 
-**JSON Configuration:** `{CONFIG_PATH}`
-- File exists: {'✅ Yes' if CONFIG_PATH.exists() else '❌ No'}
-- Genius Key: {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
-- Fallback Mode: {'✅ Enabled' if fallback else '❌ Disabled'}
-- Cache: {cache_info} (30-day expiry)
-- Cache File: `{CACHE_FILE}`
-- Match Threshold: {match_threshold}%
-- Timeout: {timeout}s
-- Max Retries: {max_retries}
+### **Configuration**
+**Config File:** `{CONFIG_PATH}`
+**Genius API Key:** {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
+**Fallback Mode:** {'✅ Enabled' if fallback else '❌ Disabled'}
+**Cache:** {cache_info} (30-day expiry)
+**Cache File:** `{CACHE_FILE}`
+**Match Threshold:** {match_threshold}%
+**Timeout:** {timeout}s
+**Max Retries:** {max_retries}
 
-**Bot Spotify Data:**
+---
+
+### **Bot Spotify Data**
 - Config Available: {'✅ Yes' if bot_has_config else '❌ No'}
 - Available Keys: {', '.join(bot_config_keys[:10])}
 - Current Song: `{str(song)[:50]}{'...' if len(str(song)) > 50 else ''}`
 - Current Artist: `{str(artist)[:50]}{'...' if len(str(artist)) > 50 else ''}`
 
-**Commands:**
+---
+
+### **Available Commands**
+- `lyrics setkey <key>` - Set Genius API key
 - `lyrics testkey` - Test your API key
-- `lyrics setkey <key>` - Set new API key  
 - `lyrics toggle` - Toggle fallback mode
 - `lyrics clearcache` - Clear search cache
-- `lyrics threshold <value>` - Set match threshold (0-100)"""
+- `lyrics threshold <value>` - Set match threshold (0–100)
+- `lyrics debug` - Show debug information
+- `lyrics config` - Show configuration details
 
-            await ctx.send(debug_msg)
-            return
+*Get a free API key at:* <https://genius.com/api-clients>"""
+
+    await ctx.send(help_msg)
+    return
         
         elif subcommand == "clearcache":
             lyrics_cache.clear()
@@ -519,43 +527,6 @@ def lyrics():
                     await msg.edit(content="# ❌ Failed to save API key to config file")
             else:
                 await msg.edit(content=f"# ❌ API key validation failed: {validation_msg}")
-            return
-            
-        elif subcommand == "config":
-            config = load_config()
-            genius_key = config.get("genius_key", "")
-            fallback = config.get("use_fallback", True)
-            cache_enabled = config.get("cache_enabled", True)
-            match_threshold = config.get("match_threshold", 25)
-            timeout = config.get("timeout", 15)
-            max_retries = config.get("max_retries", 3)
-            
-            if cache_enabled and not lyrics_cache:
-                load_cache()
-            
-            cache_info = f"{len(lyrics_cache)} entries" if cache_enabled else "Disabled"
-            
-            config_msg = f"""# **Lyrics Configuration**
-**Config File:** `{CONFIG_PATH}`
-**Genius API Key:** {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
-**Fallback Mode:** {'✅ Enabled' if fallback else '❌ Disabled'}
-**Cache:** {cache_info} (30-day expiry)
-**Cache File:** `{CACHE_FILE}`
-**Match Threshold:** {match_threshold}%
-**Timeout:** {timeout}s
-**Max Retries:** {max_retries}
-
-**Commands:**
-- `lyrics setkey <key>` - Set API key
-- `lyrics testkey` - Test current key  
-- `lyrics toggle` - Toggle fallback
-- `lyrics clearcache` - Clear cache
-- `lyrics threshold <value>` - Set match threshold
-- `lyrics debug` - Show debug info
-
-*Get a free API key at: https://genius.com/api-clients*"""
-            
-            await ctx.send(config_msg)
             return
             
         elif subcommand == "toggle":
