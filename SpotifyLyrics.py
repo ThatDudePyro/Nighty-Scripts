@@ -349,7 +349,7 @@ def lyrics():
                                                 save_to_cache(song, artist, result)
                                                 return result
                                         else:
-                                            result = f"# No search results for {display_info}"
+                                            result = f"No search results for {display_info}"
                                             save_to_cache(song, artist, result)
                                             return result
                                     elif resp.status == 429:  # Rate limited
