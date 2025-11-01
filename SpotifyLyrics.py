@@ -7,15 +7,19 @@ def SpotifyLyrics():
     import time
     from pathlib import Path
     from typing import Dict, List, Tuple, Optional, Any
+    from datetime import datetime
 
     CONFIG_PATH = Path(os.path.expandvars(r"%APPDATA%\Nighty Selfbot\data\scripts\json\LyricsConfig.json"))
-
     lyrics_cache: Dict[str, Dict[str, Any]] = {}
     CACHE_EXPIRY = 2592000
     CACHE_FILE = CONFIG_PATH.parent / "LyricsCache.json"
+    SCRIPT_NAME = "SpotifyLyrics"
+
+    async def run_in_thread(func, *args, **kwargs):
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
 
     def load_cache() -> Dict[str, Any]:
-        """Load cache from disk."""
         nonlocal lyrics_cache
         try:
             if CACHE_FILE.exists():
@@ -24,24 +28,21 @@ def SpotifyLyrics():
                     current_time = time.time()
                     lyrics_cache = {k: v for k, v in lyrics_cache.items() 
                                   if current_time - v.get("timestamp", 0) < CACHE_EXPIRY}
-                    print(f"Loaded {len(lyrics_cache)} cached entries", type_="INFO")
             return lyrics_cache
         except Exception as e:
-            print(f"Error loading cache: {e}", type_="WARNING")
+            print(f"[{SCRIPT_NAME}] Cache load error: {e}", type_="ERROR")
             lyrics_cache = {}
             return lyrics_cache
 
     def save_cache() -> None:
-        """Save cache to disk."""
         try:
             CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(CACHE_FILE, 'w', encoding='utf-8') as f:
                 json.dump(lyrics_cache, f, indent=2, ensure_ascii=False)
         except Exception as e:
-            print(f"Error saving cache: {e}", type_="WARNING")
+            print(f"[{SCRIPT_NAME}] Cache save error: {e}", type_="ERROR")
 
     def load_config() -> Dict[str, Any]:
-        """Load configuration from JSON file with better error handling."""
         try:
             CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
             
@@ -65,7 +66,7 @@ def SpotifyLyrics():
                 save_config(default_config)
                 return default_config
         except (json.JSONDecodeError, PermissionError) as e:
-            print(f"Error loading config: {e}", type_="ERROR")
+            print(f"[{SCRIPT_NAME}] Config load error: {e}", type_="ERROR")
             return {
                 "genius_key": "", 
                 "use_fallback": True, 
@@ -78,43 +79,34 @@ def SpotifyLyrics():
     def save_config(config: Dict[str, Any]) -> bool:
         try:
             CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            
             temp_path = CONFIG_PATH.with_suffix('.tmp')
             with open(temp_path, "w", encoding='utf-8') as f:
                 json.dump(config, f, indent=2, ensure_ascii=False)
-            
             temp_path.replace(CONFIG_PATH)
             return True
         except Exception as e:
-            print(f"Error saving config: {e}", type_="ERROR")
+            print(f"[{SCRIPT_NAME}] Config save error: {e}", type_="ERROR")
             return False
 
     def get_config_value(key: str, default: Any = None) -> Any:
-        """Get a single config value with type safety."""
         config = load_config()
         return config.get(key, default)
 
     def set_config_value(key: str, value: Any) -> bool:
-        """Set a single config value with validation."""
         config = load_config()
-        print(f"{key}, {value}")
         
         if not isinstance(value, str):
             if key == "timeout" and (not isinstance(value, (int, float)) or value <= 0):
-                print(f"Invalid timeout value: {value}", type_="ERROR")
                 return False
             if key == "max_retries" and (not isinstance(value, int) or value < 0):
-                print(f"Invalid max_retries value: {value}", type_="ERROR")
                 return False
             if key == "match_threshold" and (not isinstance(value, (int, float)) or not 0 <= value <= 100):
-                print(f"Invalid match_threshold value: {value}", type_="ERROR")
                 return False
         
         config[key] = value
         return save_config(config)
 
     def clean_song_title(title: str) -> str:
-        """Clean song title for better matching."""
         if not title:
             return ""
         
@@ -124,11 +116,9 @@ def SpotifyLyrics():
         title = re.sub(r'\s*-\s*remaster.*', '', title, flags=re.IGNORECASE)
         title = re.sub(r'\s*-\s*radio edit.*', '', title, flags=re.IGNORECASE)
         title = re.sub(r'\s+', ' ', title).strip()
-        
         return title
 
     async def test_genius_api_key(api_key: str) -> Tuple[bool, str]:
-        """Test if the Genius API key is valid with retry logic."""
         max_retries = get_config_value("max_retries", 3)
         timeout = get_config_value("timeout", 15)
         
@@ -164,7 +154,6 @@ def SpotifyLyrics():
         return False, "Max retries exceeded"
 
     def calculate_similarity(str1: str, str2: str) -> float:
-        """Similarity calculation with fuzzy matching."""
         if not str1 or not str2:
             return 0.0
             
@@ -198,72 +187,53 @@ def SpotifyLyrics():
         
         partial_score = min(20, partial_matches * 5)
         base_score = jaccard * 70
-        
         return min(100.0, base_score + partial_score)
 
     def find_best_match(song_title: str, artist_name: str, hits: List[Dict]) -> Tuple[Optional[Dict], float]:
-        """Find the best matching song with improved scoring."""
         if not hits:
             return None, 0.0
         
         clean_title = clean_song_title(song_title)
         clean_artist = artist_name.strip() if artist_name else ""
-        
         best_match = None
         best_score = 0.0
         match_threshold = get_config_value("match_threshold", 25)
-        
-        print(f"Searching for: '{clean_title}' by '{clean_artist}'", type_="INFO")
         
         for i, hit in enumerate(hits[:10]):
             result = hit.get("result", {})
             genius_title = result.get("title", "")
             genius_artist = result.get("primary_artist", {}).get("name", "")
-            
             clean_genius_title = clean_song_title(genius_title)
             
             title_score = calculate_similarity(clean_title, clean_genius_title)
             artist_score = calculate_similarity(clean_artist, genius_artist) if clean_artist else 50.0
-            
             combined_score = (title_score * 0.75) + (artist_score * 0.25)
             
             if combined_score > best_score and combined_score >= match_threshold:
                 best_score = combined_score
                 best_match = result
         
-        if best_match:
-            genius_title = best_match.get("title", "")
-            genius_artist = best_match.get("primary_artist", {}).get("name", "")
-            print(f"Best match: `{genius_title}` by `{genius_artist}` - Score: {best_score:.1f}%", type_="INFO")
-        else:
-            print(f"No matches found above threshold ({match_threshold}%)", type_="INFO")
-        
         return best_match, best_score
 
     def get_cache_key(song: str, artist: str) -> str:
-        """Generate cache key for song/artist combination."""
         return f"{song.lower().strip()}|{artist.lower().strip() if artist else ''}"
 
     def is_cache_valid(cache_entry: Dict[str, Any]) -> bool:
-        """Check if cache entry is still valid."""
         return time.time() - cache_entry.get("timestamp", 0) < CACHE_EXPIRY
 
-    def get_from_cache(song: str, artist: str) -> Optional[str]:
-        """Get result from cache if available and valid."""
+    async def get_from_cache(song: str, artist: str) -> Optional[str]:
         if not get_config_value("cache_enabled", True):
             return None
         
         if not lyrics_cache:
-            load_cache()
+            await run_in_thread(load_cache)
         
         cache_key = get_cache_key(song, artist)
         if cache_key in lyrics_cache and is_cache_valid(lyrics_cache[cache_key]):
-            print("Using cached result", type_="INFO")
             return lyrics_cache[cache_key]["result"]
         return None
 
-    def save_to_cache(song: str, artist: str, result: str) -> None:
-        """Save result to cache and persist to disk."""
+    async def save_to_cache(song: str, artist: str, result: str) -> None:
         if not get_config_value("cache_enabled", True):
             return
         
@@ -280,12 +250,10 @@ def SpotifyLyrics():
                                key=lambda k: lyrics_cache[k]["timestamp"])[:50]
             for key in oldest_keys:
                 del lyrics_cache[key]
-            print(f"Cleaned {len(oldest_keys)} old cache entries", type_="INFO")
         
-        save_cache()
+        await run_in_thread(save_cache)
 
     async def fetch_lyrics(bot) -> str:
-        """Fetch lyrics for the currently playing song."""
         try:
             if not hasattr(bot, 'config'):
                 return "# Bot configuration not available"
@@ -298,10 +266,9 @@ def SpotifyLyrics():
 
             song = song.strip()
             artist = artist.strip() if artist else ""
-
             display_info = f"**`{song}`**" + (f" by **`{artist}`**" if artist else "")
 
-            cached_result = get_from_cache(song, artist)
+            cached_result = await get_from_cache(song, artist)
             if cached_result:
                 return cached_result
 
@@ -316,7 +283,6 @@ def SpotifyLyrics():
                     
                     search_query = search_query.replace(' ', '%20').replace('&', '%26').replace('#', '%23')
                     search_url = f"https://api.genius.com/search?q={search_query}"
-                    
                     timeout = get_config_value("timeout", 15)
                     max_retries = get_config_value("max_retries", 3)
                     
@@ -342,26 +308,27 @@ def SpotifyLyrics():
                                                 match_info = f"`{genius_title}` by `{genius_artist}`\n(Match: `{best_score:.1f}%`)"
                                                 result = f"Lyrics for:\n{display_info}\n**Found:**\n{match_info}\n{lyrics_url}"
                                                 
-                                                save_to_cache(song, artist, result)
+                                                await save_to_cache(song, artist, result)
                                                 return result
                                             else:
-                                                result = f"# No good matches found for {display_info}\nTry checking the song/artist spelling"
-                                                save_to_cache(song, artist, result)
+                                                error_msg = f"No good matches found for {display_info}\nTry checking the song/artist spelling"
+                                                result = f"# {error_msg}"
+                                                await save_to_cache(song, artist, result)
                                                 return result
                                         else:
-                                            result = f"No search results for:\n {display_info}"
-                                            save_to_cache(song, artist, result)
+                                            error_msg = f"No search results for:\n{display_info}"
+                                            result = f"# {error_msg}"
+                                            await save_to_cache(song, artist, result)
                                             return result
-                                    elif resp.status == 429:  # Rate limited
+                                    elif resp.status == 429:
                                         if attempt < max_retries - 1:
                                             wait_time = 2 ** attempt
-                                            print(f"Rate limited, waiting {wait_time}s...", type_="WARNING")
                                             await asyncio.sleep(wait_time)
                                             continue
-                                        return f"# Rate limited - try again later"
+                                        return "# Rate limited - try again later"
                                     else:
                                         return f"# Genius API error: HTTP {resp.status}"
-                            break 
+                            break
                         except asyncio.TimeoutError:
                             if attempt < max_retries - 1:
                                 continue
@@ -374,7 +341,6 @@ def SpotifyLyrics():
                 except Exception as e:
                     return f"# Unexpected error: {str(e)}"
 
-            # Fallback mode
             use_fallback = get_config_value("use_fallback", True)
             
             if use_fallback:
@@ -384,30 +350,29 @@ def SpotifyLyrics():
                 search_encoded = search_query.replace(' ', '+').replace('&', '%26')
                 fallback_url = f"https://genius.com/search?q={search_encoded}"
                 result = f"# Search lyrics for {display_info}\n{fallback_url}"
-                
-                save_to_cache(song, artist, result)
+                await save_to_cache(song, artist, result)
                 return result
             
             return "# Lyrics not found - enable fallback mode to get search links"
             
         except Exception as e:
-            print(f"Critical error in fetch_lyrics: {e}", type_="ERROR")
+            print(f"[{SCRIPT_NAME}] Critical error: {e}", type_="ERROR")
             return f"# Critical error: {str(e)}"
 
     @bot.command(
         name="lyrics",
         aliases=["ly", "lyric"],
-        usage="[setkey <api_key>] [config] [toggle] [debug] [testkey] [clearcache] [threshold <value>]",
-        description="Get lyrics for currently playing song or manage lyrics settings"
+        usage="[subcommand] [args]"
     )
     async def lyrics_command(ctx, *, args: str = ""):
         await ctx.message.delete()
         
         args = args.strip()
-        parts = args.split(maxsplit=2) if args else []
+        parts = args.split(maxsplit=1) if args else []
         subcommand = parts[0].lower() if parts else ""
+        subargs = parts[1] if len(parts) > 1 else ""
         
-        if subcommand == "help":
+        if subcommand == "config":
             config = load_config()
             genius_key = config.get("genius_key", "")
             fallback = config.get("use_fallback", True)
@@ -416,70 +381,71 @@ def SpotifyLyrics():
             timeout = config.get("timeout", 15)
             max_retries = config.get("max_retries", 3)
             
-            bot_has_config = hasattr(ctx.bot, 'config')
-            bot_config_keys = list(ctx.bot.config.keys()) if bot_has_config else []
-            song = ctx.bot.config.get("spotify_song", "Not found") if bot_has_config else "No config"
-            artist = ctx.bot.config.get("spotify_artist", "Not found") if bot_has_config else "No config"
-            
             if cache_enabled and not lyrics_cache:
-                load_cache()
+                await run_in_thread(load_cache)
             
             cache_info = f"{len(lyrics_cache)} entries" if cache_enabled else "Disabled"
             
-            help_msg = f"""# **Lyrics Help & Configuration**
+            config_msg = f"""# **Lyrics Configuration**
 
-### **Configuration**
 **Config File:** `{CONFIG_PATH}`
-**Genius API Key:** {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
-**Fallback Mode:** {'✅ Enabled' if fallback else '❌ Disabled'}
-**Cache:** {cache_info} (30-day expiry)
 **Cache File:** `{CACHE_FILE}`
-**Match Threshold:** {match_threshold}%
-**Timeout:** {timeout}s
-**Max Retries:** {max_retries}
 
----
+**Settings:**
+- API Key: {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
+- Fallback Mode: {'✅ Enabled' if fallback else '❌ Disabled'}
+- Cache: {cache_info} (30-day expiry)
+- Match Threshold: {match_threshold}%
+- Timeout: {timeout}s
+- Max Retries: {max_retries}
 
-### **Bot Spotify Data**
-- Config Available: {'✅ Yes' if bot_has_config else '❌ No'}
-- Available Keys: {', '.join(bot_config_keys[:10])}
-- Current Song: `{str(song)[:50]}{'...' if len(str(song)) > 50 else ''}`
-- Current Artist: `{str(artist)[:50]}{'...' if len(str(artist)) > 50 else ''}`
+Use `lyrics help` for available commands."""
+            
+            await ctx.send(config_msg)
+            return
+        
+        elif subcommand == "help":
+            help_msg = f"""# **Lyrics Command Help**
 
----
+**Basic Usage:**
+`lyrics` - Fetch lyrics for currently playing song
 
-### **Available Commands**
-- `lyrics setkey <key>` - Set Genius API key
-- `lyrics testkey` - Test your API key
-- `lyrics toggle` - Toggle fallback mode
-- `lyrics clearcache` - Clear search cache
-- `lyrics threshold <value>` - Set match threshold (0–100)
-- `lyrics debug` - Show debug information
-- `lyrics config` - Show configuration details
+**Configuration:**
+`lyrics config` - Show current configuration
+`lyrics setkey <api_key>` - Set Genius API key
+`lyrics testkey` - Test your API key validity
+`lyrics toggle` - Toggle fallback mode
+`lyrics threshold <0-100>` - Set match threshold
+`lyrics timeout <seconds>` - Set request timeout
+`lyrics retries <count>` - Set max retry attempts
 
-*Get a free API key at:* <https://genius.com/api-clients>"""
+**Cache Management:**
+`lyrics clearcache` - Clear all cached results
+
+**Get API Key:** <https://genius.com/api-clients>"""
 
             await ctx.send(help_msg)
             return
         
         elif subcommand == "clearcache":
+            entry_count = len(lyrics_cache)
             lyrics_cache.clear()
             try:
                 if CACHE_FILE.exists():
-                    CACHE_FILE.unlink()
-                await ctx.send(f"# ✅ Cache cleared successfully ({len(lyrics_cache)} entries removed)")
+                    await run_in_thread(CACHE_FILE.unlink)
+                await ctx.send(f"# ✅ Cache cleared ({entry_count} entries)")
             except Exception as e:
-                await ctx.send(f"# ✅ Cache cleared from memory (file deletion failed: {e})")
+                await ctx.send(f"# ⚠️ Cache cleared from memory (file error: {e})")
             return
             
         elif subcommand == "threshold":
-            if len(parts) < 2:
+            if not subargs:
                 current_threshold = get_config_value("match_threshold", 25)
                 await ctx.send(f"# Current match threshold: {current_threshold}%\nUsage: `lyrics threshold <0-100>`")
                 return
             
             try:
-                threshold = float(parts[1])
+                threshold = float(subargs)
                 if not 0 <= threshold <= 100:
                     raise ValueError("Threshold must be between 0 and 100")
                 
@@ -491,10 +457,48 @@ def SpotifyLyrics():
                 await ctx.send(f"# ❌ Invalid threshold value: {e}")
             return
         
+        elif subcommand == "timeout":
+            if not subargs:
+                current_timeout = get_config_value("timeout", 15)
+                await ctx.send(f"# Current timeout: {current_timeout}s\nUsage: `lyrics timeout <seconds>`")
+                return
+            
+            try:
+                timeout_val = float(subargs)
+                if timeout_val <= 0:
+                    raise ValueError("Timeout must be positive")
+                
+                if set_config_value("timeout", timeout_val):
+                    await ctx.send(f"# ✅ Timeout set to {timeout_val}s")
+                else:
+                    await ctx.send("# ❌ Failed to save timeout setting")
+            except ValueError as e:
+                await ctx.send(f"# ❌ Invalid timeout value: {e}")
+            return
+        
+        elif subcommand == "retries":
+            if not subargs:
+                current_retries = get_config_value("max_retries", 3)
+                await ctx.send(f"# Current max retries: {current_retries}\nUsage: `lyrics retries <count>`")
+                return
+            
+            try:
+                retries = int(subargs)
+                if retries < 0:
+                    raise ValueError("Retries must be non-negative")
+                
+                if set_config_value("max_retries", retries):
+                    await ctx.send(f"# ✅ Max retries set to {retries}")
+                else:
+                    await ctx.send("# ❌ Failed to save retries setting")
+            except ValueError as e:
+                await ctx.send(f"# ❌ Invalid retries value: {e}")
+            return
+        
         elif subcommand == "testkey":
             genius_key = get_config_value("genius_key", "")
             if not genius_key:
-                await ctx.send("# No API key configured. Use `lyrics setkey <your_key>`")
+                await ctx.send("# ❌ No API key configured. Use `lyrics setkey <your_key>`")
                 return
             
             msg = await ctx.send("# 🔑 Testing Genius API key...")
@@ -507,13 +511,13 @@ def SpotifyLyrics():
             return
         
         elif subcommand == "setkey":
-            if len(parts) < 2:
+            if not subargs:
                 await ctx.send("# Usage: `lyrics setkey <your_genius_api_key>`\n*Get a key at: https://genius.com/api-clients*")
                 return
                 
-            api_key = parts[1].strip()
+            api_key = subargs.strip()
             if len(api_key) < 20:
-                await ctx.send("# Invalid API key format - too short")
+                await ctx.send("# ❌ Invalid API key format - too short")
                 return
             
             msg = await ctx.send("# 🔑 Testing new API key...")
@@ -521,7 +525,7 @@ def SpotifyLyrics():
             
             if is_valid:
                 if set_config_value("genius_key", api_key):
-                    await msg.edit(content="# ✅ Genius API key saved and validated successfully!")
+                    await msg.edit(content="# ✅ Genius API key saved and validated!")
                     lyrics_cache.clear()
                 else:
                     await msg.edit(content="# ❌ Failed to save API key to config file")
@@ -535,9 +539,9 @@ def SpotifyLyrics():
             
             if set_config_value("use_fallback", new_fallback):
                 status = "enabled" if new_fallback else "disabled"
-                await ctx.send(f"# Fallback mode {status}")
+                await ctx.send(f"# ✅ Fallback mode {status}")
             else:
-                await ctx.send("# Failed to update fallback setting")
+                await ctx.send("# ❌ Failed to update fallback setting")
             return
             
         else:
@@ -546,8 +550,8 @@ def SpotifyLyrics():
                 lyrics_result = await fetch_lyrics(ctx.bot)
                 await msg.edit(content=lyrics_result)
             except Exception as e:
-                print(f"Error in lyrics command: {e}", type_="ERROR")
-                await ctx.send(f"# Command error: {str(e)}")
+                print(f"[{SCRIPT_NAME}] Command error: {e}", type_="ERROR")
+                await ctx.send(f"# ❌ Command error: {str(e)}")
 
     load_cache()
 
