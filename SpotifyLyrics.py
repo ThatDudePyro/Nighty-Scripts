@@ -164,7 +164,7 @@ def lyrics():
         return False, "Max retries exceeded"
 
     def calculate_similarity(str1: str, str2: str) -> float:
-        """Enhanced similarity calculation with fuzzy matching."""
+        """Similarity calculation with fuzzy matching."""
         if not str1 or not str2:
             return 0.0
             
@@ -285,7 +285,7 @@ def lyrics():
         save_cache()
 
     async def fetch_lyrics(bot) -> str:
-        """Fetch lyrics for the currently playing song with enhanced features."""
+        """Fetch lyrics for the currently playing song."""
         try:
             if not hasattr(bot, 'config'):
                 return "# Bot configuration not available"
@@ -579,7 +579,5 @@ def lyrics():
                 await ctx.send(f"# Command error: {str(e)}")
 
     load_cache()
-
-    print("Enhanced Lyrics script loaded successfully", type_="SUCCESS")
 
 lyrics()
