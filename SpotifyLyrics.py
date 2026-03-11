@@ -305,7 +305,7 @@ def SpotifyLyrics():
                                                 genius_artist = best_match.get("primary_artist", {}).get("name", "")
                                                 
                                                 lyrics_url = f"https://genius.com{song_path}"
-                                                match_info = f"`{genius_title}` by `{genius_artist}`\n(Match: `{best_score:.1f}%`)"
+                                                match_info = f"`{genius_title}` by `{genius_artist}`\n> (Match: `{best_score:.1f}%`)"
                                                 result = f"> Lyrics for:\n> {display_info}\n> **Found:**\n> {match_info}\n> {lyrics_url}"
                                                 
                                                 await save_to_cache(song, artist, result)
