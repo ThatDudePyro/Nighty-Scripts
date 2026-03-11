@@ -392,8 +392,8 @@ def SpotifyLyrics():
 **Cache File:** `{CACHE_FILE}`
 
 **Settings:**
-- API Key: {'✅ Set (' + str(len(genius_key)) + ' chars)' if genius_key else '❌ Not set'}
-- Fallback Mode: {'✅ Enabled' if fallback else '❌ Disabled'}
+- API Key: {'Set (' + str(len(genius_key)) + ' chars)' if genius_key else 'Not set'}
+- Fallback Mode: {'Enabled' if fallback else 'Disabled'}
 - Cache: {cache_info} (30-day expiry)
 - Match Threshold: {match_threshold}%
 - Timeout: {timeout}s
@@ -433,9 +433,9 @@ Use `lyrics help` for available commands."""
             try:
                 if CACHE_FILE.exists():
                     await run_in_thread(CACHE_FILE.unlink)
-                await ctx.send(f"# ✅ Cache cleared ({entry_count} entries)")
+                await ctx.send(f"# Cache cleared ({entry_count} entries)")
             except Exception as e:
-                await ctx.send(f"# ⚠️ Cache cleared from memory (file error: {e})")
+                await ctx.send(f"# Cache cleared from memory (file error: {e})")
             return
             
         elif subcommand == "threshold":
@@ -450,11 +450,11 @@ Use `lyrics help` for available commands."""
                     raise ValueError("Threshold must be between 0 and 100")
                 
                 if set_config_value("match_threshold", threshold):
-                    await ctx.send(f"# ✅ Match threshold set to {threshold}%")
+                    await ctx.send(f"# Match threshold set to {threshold}%")
                 else:
-                    await ctx.send("# ❌ Failed to save threshold setting")
+                    await ctx.send("# Failed to save threshold setting")
             except ValueError as e:
-                await ctx.send(f"# ❌ Invalid threshold value: {e}")
+                await ctx.send(f"# Invalid threshold value: {e}")
             return
         
         elif subcommand == "timeout":
@@ -469,11 +469,11 @@ Use `lyrics help` for available commands."""
                     raise ValueError("Timeout must be positive")
                 
                 if set_config_value("timeout", timeout_val):
-                    await ctx.send(f"# ✅ Timeout set to {timeout_val}s")
+                    await ctx.send(f"# Timeout set to {timeout_val}s")
                 else:
-                    await ctx.send("# ❌ Failed to save timeout setting")
+                    await ctx.send("# Failed to save timeout setting")
             except ValueError as e:
-                await ctx.send(f"# ❌ Invalid timeout value: {e}")
+                await ctx.send(f"# Invalid timeout value: {e}")
             return
         
         elif subcommand == "retries":
@@ -488,26 +488,26 @@ Use `lyrics help` for available commands."""
                     raise ValueError("Retries must be non-negative")
                 
                 if set_config_value("max_retries", retries):
-                    await ctx.send(f"# ✅ Max retries set to {retries}")
+                    await ctx.send(f"# Max retries set to {retries}")
                 else:
-                    await ctx.send("# ❌ Failed to save retries setting")
+                    await ctx.send("# Failed to save retries setting")
             except ValueError as e:
-                await ctx.send(f"# ❌ Invalid retries value: {e}")
+                await ctx.send(f"# Invalid retries value: {e}")
             return
         
         elif subcommand == "testkey":
             genius_key = get_config_value("genius_key", "")
             if not genius_key:
-                await ctx.send("# ❌ No API key configured. Use `lyrics setkey <your_key>`")
+                await ctx.send("# No API key configured. Use `lyrics setkey <your_key>`")
                 return
             
-            msg = await ctx.send("# 🔑 Testing Genius API key...")
+            msg = await ctx.send("# Testing Genius API key...")
             is_valid, validation_msg = await test_genius_api_key(genius_key)
             
             if is_valid:
-                await msg.edit(content="# ✅ API key is valid and working!")
+                await msg.edit(content="# API key is valid and working!")
             else:
-                await msg.edit(content=f"# ❌ API key test failed: {validation_msg}")
+                await msg.edit(content=f"# API key test failed: {validation_msg}")
             return
         
         elif subcommand == "setkey":
@@ -517,20 +517,20 @@ Use `lyrics help` for available commands."""
                 
             api_key = subargs.strip()
             if len(api_key) < 20:
-                await ctx.send("# ❌ Invalid API key format - too short")
+                await ctx.send("# Invalid API key format - too short")
                 return
             
-            msg = await ctx.send("# 🔑 Testing new API key...")
+            msg = await ctx.send("# Testing new API key...")
             is_valid, validation_msg = await test_genius_api_key(api_key)
             
             if is_valid:
                 if set_config_value("genius_key", api_key):
-                    await msg.edit(content="# ✅ Genius API key saved and validated!")
+                    await msg.edit(content="# Genius API key saved and validated!")
                     lyrics_cache.clear()
                 else:
-                    await msg.edit(content="# ❌ Failed to save API key to config file")
+                    await msg.edit(content="# Failed to save API key to config file")
             else:
-                await msg.edit(content=f"# ❌ API key validation failed: {validation_msg}")
+                await msg.edit(content=f"# API key validation failed: {validation_msg}")
             return
             
         elif subcommand == "toggle":
@@ -539,9 +539,9 @@ Use `lyrics help` for available commands."""
             
             if set_config_value("use_fallback", new_fallback):
                 status = "enabled" if new_fallback else "disabled"
-                await ctx.send(f"# ✅ Fallback mode {status}")
+                await ctx.send(f"# Fallback mode {status}")
             else:
-                await ctx.send("# ❌ Failed to update fallback setting")
+                await ctx.send("# Failed to update fallback setting")
             return
             
         else:
@@ -551,7 +551,7 @@ Use `lyrics help` for available commands."""
                 await msg.edit(content=lyrics_result)
             except Exception as e:
                 print(f"[{SCRIPT_NAME}] Command error: {e}", type_="ERROR")
-                await ctx.send(f"# ❌ Command error: {str(e)}")
+                await ctx.send(f"# Command error: {str(e)}")
 
     load_cache()
 
