@@ -1,0 +1,337 @@
+def AutoReplyDM():
+    import json
+    import asyncio
+    from pathlib import Path
+    
+    BASE_DIR = Path(getScriptsPath()) / "json"
+    CONFIG_FILE = BASE_DIR / "auto_reply_dm_config.json"
+
+    def initialize_files():
+        BASE_DIR.mkdir(parents=True, exist_ok=True)
+        if not CONFIG_FILE.exists():
+            default_config = {
+                "enabled": True,
+                "triggers": [],
+                "notify_on_send": True,
+                "reply_to_self": True,
+                "default_delay": 10
+            }
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(default_config, f, indent=4)
+
+    def load_config():
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {
+                "enabled": True,
+                "triggers": [],
+                "notify_on_send": True,
+                "reply_to_self": True,
+                "default_delay": 10
+            }
+
+    def save_config(config):
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(config, f, indent=4)
+            return True
+        except Exception as e:
+            print(f"Auto Reply DM | Error saving config: {e}", type_="ERROR")
+            return False
+
+    # ======================== UI START ========================
+    tab = Tab(
+        name="Auto Reply DM",
+        title="DM Auto Reply Configuration", 
+        icon="mail",
+        gap=4
+    )
+
+    main_container = tab.create_container(type="rows", gap=4)
+    top_container = main_container.create_container(type="columns", gap=4)
+
+    settings_card = top_container.create_card(gap=3)
+    settings_card.create_ui_element(UI.Text, content="Settings", size="xl", weight="bold")
+    settings_card.create_ui_element(UI.Text, content="Works only in DMs", size="sm", color="#a0aec0")
+    
+    enable_toggle = settings_card.create_ui_element(UI.Toggle, label="Enable Auto Reply")
+    notify_toggle = settings_card.create_ui_element(UI.Toggle, label="Show Notifications")
+    reply_self_toggle = settings_card.create_ui_element(UI.Toggle, label="Reply to Self")
+    delay_input = settings_card.create_ui_element(UI.Input, label="Default Delay", placeholder="10", value="10")
+    save_btn = settings_card.create_ui_element(UI.Button, label="Save Settings", variant="cta")
+
+    add_card = top_container.create_card(gap=2)
+    add_card.create_ui_element(UI.Text, content="Add Trigger", size="xl", weight="bold")
+    add_card.create_ui_element(UI.Text, content="Toggle command: <p>autoreply", size="sm", color="#a0aec0")
+    add_card.create_ui_element(UI.Text, content="Use \\n for newlines in replies", size="sm", color="#a0aec0")
+    
+    add_row1 = add_card.create_group(type="columns", gap=3, full_width=True)
+    trigger_input = add_row1.create_ui_element(UI.Input, label="Trigger Message", placeholder="Hello bot")
+    delay_trigger_input = add_row1.create_ui_element(UI.Input, label="Delay (seconds)", placeholder="10")
+    
+    add_row2 = add_card.create_group(type="columns", gap=3, full_width=True)
+    reply_input = add_row2.create_ui_element(UI.Input, label="Reply Message", placeholder="Hi there! How are you?")
+    blacklist_input = add_row2.create_ui_element(UI.Input, label="Ignore if contains (optional)", placeholder="Enter / for none")
+    
+    add_row3 = add_card.create_group(type="columns", gap=3, full_width=True)
+    fuzzy_toggle = add_row3.create_ui_element(UI.Toggle, label="Fuzzy Match (contains phrase)")
+    
+    add_btn = add_card.create_ui_element(UI.Button, label="Add Trigger", variant="cta")
+
+    status_card = main_container.create_card(gap=3)
+    status_card.create_ui_element(UI.Text, content="Status & Current Triggers", size="xl", weight="bold")
+    
+    status_row = status_card.create_group(type="columns", gap=4, full_width=True)
+    status_text = status_row.create_ui_element(UI.Text, content="Auto Reply is enabled", size="base", color="#4ade80")
+    count_text = status_row.create_ui_element(UI.Text, content="0 triggers", size="base", color="#6b7280")
+    
+    status_card.create_ui_element(UI.Text, content="Current Triggers:", size="lg", weight="bold")
+    triggers_display = status_card.create_group(type="rows", gap=1)
+    
+    remove_select = status_card.create_ui_element(UI.Select,
+        label="Select Trigger to Remove",
+        items=[{"id": "", "title": "No triggers available"}],
+        mode="single"
+    )
+    remove_btn = status_card.create_ui_element(UI.Button, label="Remove Selected Trigger", variant="flat")
+    # ======================== UI END ========================
+
+    trigger_text_elements = []
+    
+    def fuzzy_match(message, trigger_phrase):
+        return trigger_phrase.lower() in message.lower()
+    
+    def process_newlines(text):
+        """Convert \\n to actual newlines"""
+        return text.replace("\\n", "\n")
+    
+    def update_display():
+        config = load_config()
+        enabled = config["enabled"]
+        trigger_count = len(config.get("triggers", []))
+        
+        enable_toggle.checked = enabled
+        
+        status_text.content = f"Auto Reply is {'enabled' if enabled else 'disabled'}"
+        status_text.color = "#4ade80" if enabled else "#f87171"
+        count_text.content = f"{trigger_count} trigger{'s' if trigger_count != 1 else ''} configured"
+        
+        if config.get("triggers"):
+            items = []
+            for i, trigger in enumerate(config["triggers"]):
+                match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
+                blacklist_info = f" | Ignores: {trigger['blacklist']}" if trigger.get("blacklist") else ""
+                
+                display_reply = trigger['reply_message'].replace("\n", "\\n")
+                
+                items.append({
+                    "id": str(i),
+                    "title": f"'{trigger['trigger_message']}' → '{display_reply}' ({match_type}{blacklist_info})"
+                })
+            remove_select.items = items
+        else:
+            remove_select.items = [{"id": "", "title": "No triggers to remove"}]
+
+    def refresh_triggers():
+        config = load_config()
+        
+        for element in trigger_text_elements:
+            element.visible = False
+        trigger_text_elements.clear()
+        
+        if config.get("triggers"):
+            for i, trigger in enumerate(config["triggers"]):
+                match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
+                blacklist_info = f" | Ignores: {trigger['blacklist']}" if trigger.get("blacklist") else ""
+                
+                display_reply = trigger['reply_message'].replace("\n", "\\n")
+                
+                text = f"{i+1}. '{trigger['trigger_message']}' → '{display_reply}' ({match_type}, {trigger.get('delay', 10)}s{blacklist_info})"
+                text_element = triggers_display.create_ui_element(UI.Text, content=text, size="sm")
+                trigger_text_elements.append(text_element)
+        else:
+            no_triggers_element = triggers_display.create_ui_element(UI.Text, content="No triggers configured", size="sm", color="#6b7280")
+            trigger_text_elements.append(no_triggers_element)
+        
+        update_display()
+
+    async def remove_selected_trigger():
+        if not remove_select.selected_items or not remove_select.selected_items[0]:
+            tab.toast(type="ERROR", title="No Selection", description="Please select a trigger to remove")
+            return
+            
+        try:
+            index = int(remove_select.selected_items[0])
+            config = load_config()
+            
+            if 0 <= index < len(config["triggers"]):
+                removed = config["triggers"].pop(index)
+                if save_config(config):
+                    refresh_triggers()
+                    tab.toast(type="SUCCESS", title="Trigger Removed", description=f"Removed: '{removed['trigger_message']}'")
+                else:
+                    tab.toast(type="ERROR", title="Save Failed")
+            else:
+                tab.toast(type="ERROR", title="Error", description="Invalid trigger selection")
+        except (ValueError, TypeError):
+            tab.toast(type="ERROR", title="Error", description="Invalid trigger selection")
+
+    async def save_settings():
+        config = load_config()
+        config["enabled"] = enable_toggle.checked
+        config["notify_on_send"] = notify_toggle.checked
+        config["reply_to_self"] = reply_self_toggle.checked
+        
+        try:
+            config["default_delay"] = max(0, int(delay_input.value or "10"))
+        except ValueError:
+            config["default_delay"] = 10
+            
+        if save_config(config):
+            update_display()
+            tab.toast(type="SUCCESS", title="Settings Saved")
+        else:
+            tab.toast(type="ERROR", title="Save Failed")
+
+    async def add_trigger():
+        trigger_msg = trigger_input.value.strip()
+        reply_msg = reply_input.value.strip()
+        delay = delay_trigger_input.value.strip()
+        fuzzy = fuzzy_toggle.checked
+        blacklist = blacklist_input.value.strip()
+
+        if not trigger_msg or not reply_msg or not delay:
+            tab.toast(type="ERROR", title="Missing Information", description="Fill trigger, reply, and delay")
+            return
+
+        try:
+            delay_num = max(0, int(delay))
+        except ValueError:
+            tab.toast(type="ERROR", title="Invalid Input", description="Delay must be a number")
+            return
+
+        config = load_config()
+        
+        for existing_trigger in config["triggers"]:
+            if existing_trigger["trigger_message"].lower() == trigger_msg.lower():
+                tab.toast(type="ERROR", title="Duplicate Trigger", description="This trigger already exists")
+                return
+        
+        processed_reply = process_newlines(reply_msg)
+        
+        new_trigger = {
+            "trigger_message": trigger_msg,
+            "reply_message": processed_reply,
+            "delay": delay_num,
+            "fuzzy_match": fuzzy
+        }
+        
+        if blacklist and blacklist != "/":
+            new_trigger["blacklist"] = blacklist
+        
+        config["triggers"].append(new_trigger)
+        
+        if save_config(config):
+            trigger_input.value = ""
+            reply_input.value = ""
+            delay_trigger_input.value = ""
+            fuzzy_toggle.checked = False
+            blacklist_input.value = ""
+            
+            refresh_triggers()
+            
+            match_type = "Fuzzy" if fuzzy else "Exact"
+            blacklist_info = f" with blacklist: {blacklist}" if blacklist and blacklist != "/" else ""
+            tab.toast(type="SUCCESS", title="Trigger Added", description=f"Added: '{trigger_msg}' ({match_type}{blacklist_info})")
+        else:
+            tab.toast(type="ERROR", title="Save Failed", description="Failed to save trigger")
+
+    save_btn.onClick = save_settings
+    add_btn.onClick = add_trigger
+    remove_btn.onClick = remove_selected_trigger
+
+    @bot.command(
+        name="autoreply",
+        aliases=["ar","ardm", "dmreply"],
+        description="Toggle DM auto-reply on or off"
+    )
+    async def toggle_auto_reply(ctx, *, args: str = ""):
+        await ctx.message.delete()
+        
+        config = load_config()
+        config["enabled"] = not config["enabled"]
+        
+        if save_config(config):
+            status = "enabled" if config["enabled"] else "disabled"
+            msg = await ctx.send(f"Auto Reply has been **{status}**")
+            print(f"Auto Reply DM | Toggled to {status} via command", type_="INFO")
+            
+            update_display()
+            
+            await asyncio.sleep(3)
+            await msg.delete()
+        else:
+            msg = await ctx.send("❌ Failed to toggle Auto Reply")
+            await asyncio.sleep(3)
+            await msg.delete()
+
+    @bot.listen('on_message')
+    async def handle_auto_reply(message):
+        if not isinstance(message.channel, discord.DMChannel):
+            return
+            
+        config = load_config()
+        if not config["enabled"] or not config.get("triggers"):
+            return
+
+        if not config.get("reply_to_self", True) and message.author == bot.user:
+            return
+
+        for trigger in config["triggers"]:
+            trigger_msg = trigger["trigger_message"]
+            incoming_msg = message.content.strip()
+            
+            if trigger.get("blacklist"):
+                blacklist_phrases = [phrase.strip().lower() for phrase in trigger["blacklist"].split(",")]
+                message_lower = incoming_msg.lower()
+                
+                if any(phrase in message_lower for phrase in blacklist_phrases if phrase):
+                    continue
+            
+            if trigger.get("fuzzy_match", False):
+                match = fuzzy_match(incoming_msg, trigger_msg)
+            else:
+                match = incoming_msg.lower() == trigger_msg.lower()
+            
+            if match:
+                delay = trigger.get("delay", config["default_delay"])
+                
+                if config.get("notify_on_send", True):
+                    dm_user = message.author.name if message.author != bot.user else "Self"
+                    match_type = "Fuzzy" if trigger.get("fuzzy_match", False) else "Exact"
+                    print(f"Auto Reply DM | {match_type} match from {dm_user} - responding in {delay}s", type_="INFO")
+                
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                
+                try:
+                    await message.reply(trigger["reply_message"])
+                    if config.get("notify_on_send", True):
+                        print(f"Auto Reply DM | Sent: '{trigger['reply_message']}'", type_="INFO")
+                except Exception as e:
+                    print(f"Auto Reply DM | Error: {e}", type_="ERROR")
+                break
+
+    initialize_files()
+    config = load_config()
+    enable_toggle.checked = config["enabled"]
+    notify_toggle.checked = config.get("notify_on_send", True)
+    reply_self_toggle.checked = config.get("reply_to_self", True)
+    delay_input.value = str(config.get("default_delay", 10))
+    refresh_triggers()
+
+    tab.render()
+
+AutoReplyDM()
