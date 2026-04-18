@@ -1,9 +1,8 @@
-import json
-import asyncio
-from pathlib import Path
-
 def AutoReply():
-    
+    import json
+    import asyncio
+    from pathlib import Path
+
     BASE_DIR = Path(getScriptsPath()) / "json"
     CONFIG_FILE = BASE_DIR / "auto_reply_config.json"
 
