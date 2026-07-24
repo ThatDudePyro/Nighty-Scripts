@@ -1,3 +1,9 @@
+@nightyScript(
+    name="DM Logger",
+    author="0pyr",
+    description="Logs DMs using webhooks",
+    usage="Configure via UI tab"
+)
 def DMLogger():
     import json
     import asyncio
@@ -56,6 +62,8 @@ def DMLogger():
                     "log_edited": True,
                     "log_embeds": True,
                     "log_attachments": True,
+                    "whitelist_enabled": False,
+                    "whitelist": [],
                     "destination_channel_id": None,
                     "webhook_url": None,
                     "webhook_id": None,
@@ -71,6 +79,8 @@ def DMLogger():
                 ("log_edited", True),
                 ("log_embeds", True),
                 ("log_attachments", True),
+                ("whitelist_enabled", False),
+                ("whitelist", []),
                 ("webhook_url", None),
                 ("webhook_id", None),
                 ("webhook_token", None)
@@ -88,6 +98,8 @@ def DMLogger():
                 "log_edited": True,
                 "log_embeds": True,
                 "log_attachments": True,
+                "whitelist_enabled": False,
+                "whitelist": [],
                 "destination_channel_id": None,
                 "webhook_url": None,
                 "webhook_id": None,
@@ -111,7 +123,7 @@ def DMLogger():
         try:
             url = f"https://discord.com/api/v9/channels/{channel_id}/webhooks"
             headers = {"Authorization": bot.http.token, "Content-Type": "application/json"}
-            response = requests.post(url, headers=headers, json={"name": webhook_name}, timeout=10)
+            response = requests.post(url, headers=headers, json={"name": webhook_name}, timeout=10, verify=False)
             response.raise_for_status()
             webhook_data = response.json()
             webhook_url = f"https://discord.com/api/webhooks/{webhook_data['id']}/{webhook_data['token']}"
@@ -124,34 +136,76 @@ def DMLogger():
         if not webhook_url:
             return False
         try:
-            return requests.get(webhook_url, timeout=10).status_code == 200
+            return requests.get(webhook_url, timeout=10, verify=False).status_code == 200
         except Exception:
             return False
 
-    def send_webhook_message(webhook_url, content=None, embed_data=None, username=None, avatar_url=None):
+    def send_webhook_message(webhook_url, content=None, embed_data=None, embeds=None, username=None, avatar_url=None, files=None):
         if not webhook_url:
             return False
         payload = {}
         if content:
             payload["content"] = content
+        all_embeds = []
         if embed_data:
-            payload["embeds"] = [embed_data]
+            all_embeds.append(embed_data)
+        if embeds:
+            all_embeds.extend(embeds)
+        if all_embeds:
+            payload["embeds"] = all_embeds[:10]
         if username:
             payload["username"] = username
         if avatar_url:
             payload["avatar_url"] = avatar_url
         try:
-            response = requests.post(
-                webhook_url,
-                headers={"Content-Type": "application/json"},
-                data=json.dumps(payload),
-                timeout=10
-            )
+            if files:
+                multipart_files = []
+                opened_files = []
+                try:
+                    for i, (file_path, file_name) in enumerate(files):
+                        f = open(file_path, "rb")
+                        opened_files.append(f)
+                        multipart_files.append((f"files[{i}]", (file_name, f)))
+                    multipart_files.append(("payload_json", (None, json.dumps(payload), "application/json")))
+                    response = requests.post(webhook_url, files=multipart_files, timeout=20, verify=False)
+                finally:
+                    for f in opened_files:
+                        try:
+                            f.close()
+                        except Exception:
+                            pass
+            else:
+                response = requests.post(
+                    webhook_url,
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(payload),
+                    timeout=10,
+                    verify=False
+                )
             response.raise_for_status()
             return response.status_code in (200, 204)
         except requests.exceptions.RequestException as e:
             print(f"DM Logger | Webhook error: {e}", type_="ERROR")
             return False
+
+    async def download_attachment(att):
+        try:
+            loop = asyncio.get_event_loop()
+            def _fetch():
+                r = requests.get(att.url, timeout=20, verify=False)
+                r.raise_for_status()
+                return r.content
+            data = await loop.run_in_executor(None, _fetch)
+            temp_dir = Path(getScriptsPath()) / "tmp"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = f"{att.id}_{att.filename}"
+            file_path = temp_dir / safe_name
+            with open(file_path, "wb") as f:
+                f.write(data)
+            return str(file_path), att.filename
+        except Exception as e:
+            print(f"DM Logger | Attachment download failed: {e}", type_="ERROR")
+            return None, None
 
     def extract_all_urls(text):
         if not text:
@@ -182,12 +236,23 @@ def DMLogger():
             save_config(config)
         return new_url
 
+    def resolve_user_label(user_id: str) -> str:
+        try:
+            user = bot.get_user(int(user_id))
+            if user:
+                return f"{user.name} - {user_id}"
+        except Exception:
+            pass
+        return f"Unknown - {user_id}"
+
     # ======================== UI START ========================
 
     tab = Tab(name="DM Logger", title="DM Logger Configuration", icon="message", gap=3)
     main_container = tab.create_container(type="rows", gap=3)
+
     top_row = main_container.create_container(type="columns", gap=3)
 
+    # --- Settings card (top left) ---
     settings_card = top_row.create_card(gap=2)
     settings_card.create_ui_element(UI.Text, content="Settings", size="lg", weight="bold")
 
@@ -207,8 +272,12 @@ def DMLogger():
     log_embeds_toggle = toggle_row_4.create_ui_element(UI.Toggle, label="Log Embeds")
     log_attachments_toggle = toggle_row_4.create_ui_element(UI.Toggle, label="Log Attachments")
 
+    toggle_row_5 = settings_card.create_group(type="columns", gap=4)
+    whitelist_toggle = toggle_row_5.create_ui_element(UI.Toggle, label="Whitelist Only")
+
     save_settings_btn = settings_card.create_ui_element(UI.Button, label="Save", variant="cta", full_width=True)
 
+    # --- Destination card (top right) ---
     dest_card = top_row.create_card(gap=2)
     dest_card.create_ui_element(UI.Text, content="Log Destination", size="lg", weight="bold")
     dest_card.create_ui_element(UI.Text, content="A single webhook is maintained for the destination channel.", size="sm", color="#6b7280")
@@ -226,7 +295,41 @@ def DMLogger():
     dest_status_text = dest_card.create_ui_element(UI.Text, content="No destination set", size="sm", color="#f87171")
     save_destination_btn = dest_card.create_ui_element(UI.Button, label="Save Destination", variant="cta", full_width=True)
 
+    bottom_row = main_container.create_container(type="columns", gap=3)
+
+    # --- Whitelist card (bottom right, spans under dest) ---
+    whitelist_card = bottom_row.create_card(gap=2)
+    whitelist_card.create_ui_element(UI.Text, content="Whitelist", size="lg", weight="bold")
+    whitelist_card.create_ui_element(UI.Text, content="When Whitelist Only is enabled, only DMs from these users are logged.", size="sm", color="#6b7280")
+
+    whitelist_count_text = whitelist_card.create_ui_element(UI.Text, content="0 users whitelisted", size="sm", color="#6b7280")
+
+    wl_input_row = whitelist_card.create_group(type="columns", gap=2)
+    whitelist_input = wl_input_row.create_ui_element(UI.Input, label="User ID", placeholder="Enter a User ID...")
+    add_user_btn = wl_input_row.create_ui_element(UI.Button, label="Add", variant="cta")
+
+    whitelist_select = whitelist_card.create_ui_element(
+        UI.Select,
+        label="Whitelisted Users",
+        items=[{"id": "__none__", "title": "No users whitelisted"}],
+        disabled_items=["__none__"],
+        mode="single",
+        full_width=True
+    )
+    remove_user_btn = whitelist_card.create_ui_element(UI.Button, label="Remove Selected", variant="flat", full_width=True)
+
     # ======================== UI END ========================
+
+    def refresh_whitelist_ui():
+        cfg = load_config()
+        wl = cfg.get("whitelist", [])
+        whitelist_count_text.content = f"{len(wl)} user{'s' if len(wl) != 1 else ''} whitelisted"
+        if wl:
+            whitelist_select.items = [{"id": uid, "title": resolve_user_label(uid)} for uid in wl]
+            whitelist_select.disabled_items = []
+        else:
+            whitelist_select.items = [{"id": "__none__", "title": "No users whitelisted"}]
+            whitelist_select.disabled_items = ["__none__"]
 
     def update_dest_channel_list(selected_server_ids):
         if not selected_server_ids or selected_server_ids[0] in ["", "select_server"]:
@@ -253,6 +356,7 @@ def DMLogger():
         config["log_edited"] = log_edited_toggle.checked
         config["log_embeds"] = log_embeds_toggle.checked
         config["log_attachments"] = log_attachments_toggle.checked
+        config["whitelist_enabled"] = whitelist_toggle.checked
         if save_config(config):
             tab.toast(type="SUCCESS", title="Settings Saved", description="Your settings have been saved.")
         else:
@@ -262,7 +366,6 @@ def DMLogger():
         if not dest_channel_select.selected_items or dest_channel_select.selected_items[0] in ["", "select_channel"]:
             tab.toast(type="ERROR", title="No Channel Selected", description="Please select a destination channel.")
             return
-
         channel_id = dest_channel_select.selected_items[0]
         try:
             discord_channel = bot.get_channel(int(channel_id))
@@ -272,25 +375,22 @@ def DMLogger():
         except:
             tab.toast(type="ERROR", title="Invalid Channel", description="Channel ID is invalid.")
             return
-
         config = load_config()
         old_dest = config.get("destination_channel_id")
         old_webhook_id = config.get("webhook_id")
         old_webhook_token = config.get("webhook_token")
-
         if old_dest != channel_id and old_webhook_id and old_webhook_token:
             await run_in_thread(
                 lambda: requests.delete(
                     f"https://discord.com/api/v9/webhooks/{old_webhook_id}/{old_webhook_token}",
-                    timeout=10
+                    timeout=10,
+                    verify=False
                 )
             )
             config["webhook_url"] = None
             config["webhook_id"] = None
             config["webhook_token"] = None
-
         config["destination_channel_id"] = channel_id
-
         save_destination_btn.loading = True
         try:
             new_url, new_id, new_token = await run_in_thread(create_webhook, channel_id, "DM Logger")
@@ -298,7 +398,6 @@ def DMLogger():
                 config["webhook_url"] = new_url
                 config["webhook_id"] = new_id
                 config["webhook_token"] = new_token
-
             if save_config(config):
                 dest_status_text.content = f"Logging to: {discord_channel.guild.name} -> #{discord_channel.name}"
                 dest_status_text.color = "#4ade80"
@@ -311,8 +410,42 @@ def DMLogger():
         finally:
             save_destination_btn.loading = False
 
+    async def add_user():
+        uid = whitelist_input.value.strip() if whitelist_input.value else ""
+        if not uid:
+            tab.toast(type="ERROR", title="No Input", description="Please enter a User ID.")
+            return
+        cfg = load_config()
+        wl = cfg.get("whitelist", [])
+        if uid in wl:
+            tab.toast(type="ERROR", title="Already Added", description=f"{resolve_user_label(uid)} is already whitelisted.")
+            return
+        wl.append(uid)
+        cfg["whitelist"] = wl
+        save_config(cfg)
+        whitelist_input.value = ""
+        refresh_whitelist_ui()
+        tab.toast(type="SUCCESS", title="Added", description=f"{resolve_user_label(uid)} added to whitelist.")
+
+    async def remove_user():
+        selected = whitelist_select.selected_items
+        if not selected or selected[0] == "__none__":
+            tab.toast(type="ERROR", title="No Selection", description="Select a user to remove.")
+            return
+        uid = selected[0]
+        cfg = load_config()
+        wl = cfg.get("whitelist", [])
+        if uid in wl:
+            wl.remove(uid)
+            cfg["whitelist"] = wl
+            save_config(cfg)
+            refresh_whitelist_ui()
+            tab.toast(type="SUCCESS", title="Removed", description=f"Removed {resolve_user_label(uid)} from whitelist.")
+
     save_settings_btn.onClick = save_settings
     save_destination_btn.onClick = save_destination
+    add_user_btn.onClick = add_user
+    remove_user_btn.onClick = remove_user
     dest_server_select.onChange = update_dest_channel_list
 
     @bot.listen('on_message')
@@ -326,37 +459,18 @@ def DMLogger():
             return
         if not config.get("destination_channel_id"):
             return
+        if config.get("whitelist_enabled", False):
+            if str(message.author.id) not in config.get("whitelist", []):
+                return
 
         webhook_url = await get_or_create_webhook(config)
         if not webhook_url:
             return
 
         theme_color, theme_small_image, theme_large_image = get_theme_values()
-
         content_text = message.content or ""
         inline_urls = extract_all_urls(content_text)
-        attachments = [att.url for att in message.attachments] if message.attachments else []
-
-        links_to_send = []
-        if config.get("log_attachments", True):
-            for u in inline_urls:
-                if u not in links_to_send:
-                    links_to_send.append(u)
-            for a in attachments:
-                if a not in links_to_send:
-                    links_to_send.append(a)
-
-        media_urls = [u for u in links_to_send if re.search(r'\.(?:jpg|jpeg|png|gif|webp|bmp)(\?|$)', u, re.IGNORECASE)]
-        other_links = [u for u in links_to_send if u not in media_urls]
-
-        cleaned_content = content_text
-        if links_to_send and cleaned_content:
-            for l in links_to_send:
-                cleaned_content = cleaned_content.replace(l, "")
-            cleaned_content = re.sub(r'\s+\n', '\n', cleaned_content)
-            cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content).strip() or None
-        else:
-            cleaned_content = cleaned_content or None
+        attachment_urls = set(att.url for att in message.attachments) if message.attachments else set()
 
         author_display = message.author.name
         if hasattr(message.author, "discriminator") and message.author.discriminator and message.author.discriminator != "0":
@@ -364,7 +478,7 @@ def DMLogger():
 
         embed_data = {
             "title": f"DM from {message.author.name}",
-            "description": cleaned_content[:2000] if cleaned_content else "*No content*",
+            "description": content_text[:2000] if content_text else "*No content*",
             "color": theme_color,
             "author": {
                 "name": author_display,
@@ -376,51 +490,66 @@ def DMLogger():
             ]
         }
 
-        if theme_small_image and not links_to_send:
+        if theme_small_image:
             embed_data["thumbnail"] = {"url": theme_small_image}
-        if theme_large_image and not links_to_send:
+        if theme_large_image:
             embed_data["image"] = {"url": theme_large_image}
 
         try:
             content_to_send = f"<@{bot.user.id}>" if config.get("ping_on_log", False) else None
             avatar_url = str(message.author.avatar.url) if message.author.avatar else None
 
+            extra_embeds = []
+            if config.get("log_embeds", True) and message.embeds:
+                for original_embed in message.embeds:
+                    ed = original_embed.to_dict()
+                    embed_type = ed.get("type", "")
+                    if embed_type in ("link", "image", "video", "gifv"):
+                        continue
+                    embed_url = ed.get("url", "")
+                    image_url = (ed.get("image") or {}).get("url", "")
+                    video_url = (ed.get("video") or {}).get("url", "")
+                    thumb_url = (ed.get("thumbnail") or {}).get("url", "")
+                    if any(u in attachment_urls for u in [embed_url, image_url, video_url, thumb_url]):
+                        continue
+                    extra_embeds.append(ed)
+
+            downloaded_files = []
+            if config.get("log_attachments", True) and message.attachments:
+                results = await asyncio.gather(*[download_attachment(att) for att in message.attachments], return_exceptions=True)
+                for r in results:
+                    if not isinstance(r, Exception) and r and r[0] and r[1]:
+                        downloaded_files.append(r)
+
             await run_in_thread(
                 send_webhook_message,
                 webhook_url=webhook_url,
                 content=content_to_send,
                 embed_data=embed_data,
+                embeds=extra_embeds if extra_embeds else None,
                 username=message.author.name,
-                avatar_url=avatar_url
+                avatar_url=avatar_url,
+                files=downloaded_files[:10] if downloaded_files else None
             )
 
-            for link in other_links:
+            for fp, _ in downloaded_files:
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+
+            for i in range(10, len(downloaded_files), 10):
                 await run_in_thread(
                     send_webhook_message,
                     webhook_url=webhook_url,
-                    content=link,
                     username=message.author.name,
-                    avatar_url=avatar_url
+                    avatar_url=avatar_url,
+                    files=downloaded_files[i:i+10]
                 )
 
-            for media in media_urls:
-                await run_in_thread(
-                    send_webhook_message,
-                    webhook_url=webhook_url,
-                    content=media,
-                    username=message.author.name,
-                    avatar_url=avatar_url
-                )
-
-            if config.get("log_embeds", True) and message.embeds:
-                for original_embed in message.embeds:
-                    await run_in_thread(
-                        send_webhook_message,
-                        webhook_url=webhook_url,
-                        embed_data=original_embed.to_dict(),
-                        username=message.author.name,
-                        avatar_url=avatar_url
-                    )
+            if inline_urls:
+                for url in inline_urls:
+                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=url, username=message.author.name, avatar_url=avatar_url)
 
             if config.get("notify_on_log", True):
                 print(f"DM Logger | Logged DM from {message.author.name}", type_="INFO")
@@ -440,6 +569,9 @@ def DMLogger():
             return
         if before.content == after.content:
             return
+        if config.get("whitelist_enabled", False):
+            if str(after.author.id) not in config.get("whitelist", []):
+                return
 
         webhook_url = await get_or_create_webhook(config)
         if not webhook_url:
@@ -475,16 +607,7 @@ def DMLogger():
         try:
             content_to_send = f"<@{bot.user.id}>" if config.get("ping_on_log", False) else None
             avatar_url = str(after.author.avatar.url) if after.author.avatar else None
-
-            await run_in_thread(
-                send_webhook_message,
-                webhook_url=webhook_url,
-                content=content_to_send,
-                embed_data=embed_data,
-                username=after.author.name,
-                avatar_url=avatar_url
-            )
-
+            await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=content_to_send, embed_data=embed_data, username=after.author.name, avatar_url=avatar_url)
             if config.get("notify_on_log", True):
                 print(f"DM Logger | Logged edited DM from {after.author.name}", type_="INFO")
         except Exception as e:
@@ -501,12 +624,18 @@ def DMLogger():
             return
         if not config.get("destination_channel_id") or not config.get("log_deleted", True):
             return
+        if config.get("whitelist_enabled", False):
+            if str(message.author.id) not in config.get("whitelist", []):
+                return
 
         webhook_url = await get_or_create_webhook(config)
         if not webhook_url:
             return
 
         _, theme_small_image, theme_large_image = get_theme_values()
+        content_text = message.content or ""
+        inline_urls = extract_all_urls(content_text)
+        attachment_urls = set(att.url for att in message.attachments) if message.attachments else set()
 
         author_display = message.author.name
         if hasattr(message.author, "discriminator") and message.author.discriminator and message.author.discriminator != "0":
@@ -514,7 +643,7 @@ def DMLogger():
 
         embed_data = {
             "title": f"DM Deleted from {message.author.name}",
-            "description": message.content[:2000] if message.content else "*Content not cached*",
+            "description": content_text[:2000] if content_text else "*Content not cached*",
             "color": 0xef4444,
             "author": {
                 "name": author_display,
@@ -535,14 +664,57 @@ def DMLogger():
             content_to_send = f"<@{bot.user.id}>" if config.get("ping_on_log", False) else None
             avatar_url = str(message.author.avatar.url) if message.author.avatar else None
 
+            extra_embeds = []
+            if config.get("log_embeds", True) and message.embeds:
+                for original_embed in message.embeds:
+                    ed = original_embed.to_dict()
+                    embed_type = ed.get("type", "")
+                    if embed_type in ("link", "image", "video", "gifv"):
+                        continue
+                    embed_url = ed.get("url", "")
+                    image_url = (ed.get("image") or {}).get("url", "")
+                    video_url = (ed.get("video") or {}).get("url", "")
+                    thumb_url = (ed.get("thumbnail") or {}).get("url", "")
+                    if any(u in attachment_urls for u in [embed_url, image_url, video_url, thumb_url]):
+                        continue
+                    extra_embeds.append(ed)
+
+            downloaded_files = []
+            if config.get("log_attachments", True) and message.attachments:
+                results = await asyncio.gather(*[download_attachment(att) for att in message.attachments], return_exceptions=True)
+                for r in results:
+                    if not isinstance(r, Exception) and r and r[0] and r[1]:
+                        downloaded_files.append(r)
+
             await run_in_thread(
                 send_webhook_message,
                 webhook_url=webhook_url,
                 content=content_to_send,
                 embed_data=embed_data,
+                embeds=extra_embeds if extra_embeds else None,
                 username=message.author.name,
-                avatar_url=avatar_url
+                avatar_url=avatar_url,
+                files=downloaded_files[:10] if downloaded_files else None
             )
+
+            for fp, _ in downloaded_files:
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+
+            for i in range(10, len(downloaded_files), 10):
+                await run_in_thread(
+                    send_webhook_message,
+                    webhook_url=webhook_url,
+                    username=message.author.name,
+                    avatar_url=avatar_url,
+                    files=downloaded_files[i:i+10]
+                )
+
+            if inline_urls:
+                for url in inline_urls:
+                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=url, username=message.author.name, avatar_url=avatar_url)
 
             if config.get("notify_on_log", True):
                 print(f"DM Logger | Logged deleted DM from {message.author.name}", type_="INFO")
@@ -580,6 +752,9 @@ def DMLogger():
     log_edited_toggle.checked = config.get("log_edited", True)
     log_embeds_toggle.checked = config.get("log_embeds", True)
     log_attachments_toggle.checked = config.get("log_attachments", True)
+    whitelist_toggle.checked = config.get("whitelist_enabled", False)
+
+    refresh_whitelist_ui()
 
     dest_id = config.get("destination_channel_id")
     if dest_id:

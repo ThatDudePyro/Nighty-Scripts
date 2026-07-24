@@ -1,9 +1,15 @@
-import random
-import json
-import re
-from pathlib import Path
-
+@nightyScript(
+    name="Hex Tool",
+    author="0pyr",
+    description="Generate random hex color codes or display specific hex colors with RGB values and color previews.",
+    usage="<p>hex - Generate a random hex color code with preview.\n<p>hex [hex_code] - Display a specific hex color code with preview."
+)
 def HexTool():
+    import random
+    import json
+    import re
+    from pathlib import Path
+
     BASE_DIR = Path(getScriptsPath()) / "json"
     HEX_FILE = BASE_DIR / "hex_settings.json"
 
@@ -140,7 +146,7 @@ def HexTool():
 
     async def process_hex_command(message, hex_code, is_custom=False):
         hex_settings = load_hex_settings()
-        
+
         try:
             if hex_settings["use_embed"]:
                 hex_without_hash = hex_code[1:]
@@ -155,7 +161,7 @@ def HexTool():
                 direct_image_url = f"https://dummyimage.com/300x300/{hex_without_hash}/{hex_without_hash}.png" if hex_settings.get("show_color_preview", True) else None
 
                 title = "🎨 Custom Hex Color" if is_custom else "🎨 Random Hex Code"
-                
+
                 await send_embed(
                     ctx=message,
                     content=description,
@@ -196,11 +202,11 @@ def HexTool():
                 print(f"Error deleting command message: {e}", type_="ERROR")
 
         command_parts = message.content.strip().split()
-        
+
         if len(command_parts) > 1:
             provided_hex = ' '.join(command_parts[1:])
             validated_hex = validate_hex_code(provided_hex)
-            
+
             if validated_hex:
                 await process_hex_command(message, validated_hex, is_custom=True)
             else:

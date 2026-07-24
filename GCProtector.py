@@ -1,3 +1,9 @@
+@nightyScript(
+    name="GC Name Protector",
+    author="0pyr",
+    description="Protects a Group DM's name from being changed by others.",
+    usage="<p>gcprotect <new name> | <p>gcprotect <Group ID> <new name>"
+)
 def GC_Protector():
     from pathlib import Path
     import json

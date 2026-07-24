@@ -1,7 +1,14 @@
+@nightyScript(
+    name="Channel Logger",
+    author="0pyr",
+    description="Logs messages from configured channels using webhooks",
+    usage="Configure via UI tab"
+)
 def ChannelLogger():
     import json
     import asyncio
     import requests
+    import discord
     from pathlib import Path
     from datetime import datetime
     import os
@@ -49,7 +56,7 @@ def ChannelLogger():
             with open(CONFIG_FILE, "w") as f:
                 json.dump({
                     "enabled": True, "log_self": False, "notify_on_log": True, "ping_on_log": False,
-                    "log_deleted": True, "log_edited": True, "log_embeds": True,
+                    "log_on_send": True, "log_deleted": True, "log_edited": True, "log_embeds": True,
                     "log_attachments": True, "log_bulk_deleted": True, "sources": []
                 }, f, indent=4)
 
@@ -76,14 +83,17 @@ def ChannelLogger():
                 cfg["sources"] = sources
                 for k in ["log_channels", "log_categories", "log_servers", "destination_channel_id", "webhook_url", "webhook_id", "webhook_token"]:
                     cfg.pop(k, None)
-            for key, default in [("log_deleted", True), ("log_edited", True), ("log_embeds", True), ("log_attachments", True), ("log_bulk_deleted", True)]:
+            for key, default in [
+                ("log_on_send", True), ("log_deleted", True), ("log_edited", True),
+                ("log_embeds", True), ("log_attachments", True), ("log_bulk_deleted", True)
+            ]:
                 if key not in cfg:
                     cfg[key] = default
             return cfg
         except (FileNotFoundError, json.JSONDecodeError):
             return {
                 "enabled": True, "log_self": False, "notify_on_log": True, "ping_on_log": False,
-                "log_deleted": True, "log_edited": True, "log_embeds": True,
+                "log_on_send": True, "log_deleted": True, "log_edited": True, "log_embeds": True,
                 "log_attachments": True, "log_bulk_deleted": True, "sources": []
             }
 
@@ -104,7 +114,7 @@ def ChannelLogger():
         try:
             url = f"https://discord.com/api/v9/channels/{channel_id}/webhooks"
             headers = {"Authorization": bot.http.token, "Content-Type": "application/json"}
-            response = requests.post(url, headers=headers, json={"name": webhook_name}, timeout=10)
+            response = requests.post(url, headers=headers, json={"name": webhook_name}, timeout=10, verify=False)
             response.raise_for_status()
             data = response.json()
             return f"https://discord.com/api/webhooks/{data['id']}/{data['token']}", data['id'], data['token']
@@ -116,29 +126,85 @@ def ChannelLogger():
         if not webhook_url:
             return False
         try:
-            return requests.get(webhook_url, timeout=10).status_code == 200
+            return requests.get(webhook_url, timeout=10, verify=False).status_code == 200
         except Exception:
             return False
 
-    def send_webhook_message(webhook_url, content=None, embed_data=None, username=None, avatar_url=None):
+    def send_webhook_message(webhook_url, content=None, embed_data=None, embeds=None, username=None, avatar_url=None, files=None):
         if not webhook_url:
             return False
+
         payload = {}
         if content:
             payload["content"] = content
+        all_embeds = []
         if embed_data:
-            payload["embeds"] = [embed_data]
+            all_embeds.append(embed_data)
+        if embeds:
+            all_embeds.extend(embeds)
+        if all_embeds:
+            payload["embeds"] = all_embeds[:10]  # Discord max 10 embeds per message
         if username:
             payload["username"] = username
         if avatar_url:
             payload["avatar_url"] = avatar_url
+
         try:
-            response = requests.post(webhook_url, headers={"Content-Type": "application/json"}, data=json.dumps(payload), timeout=10)
+            if files:
+                multipart_files = []
+                opened_files = []
+                try:
+                    for i, (file_path, file_name) in enumerate(files):
+                        f = open(file_path, "rb")
+                        opened_files.append(f)
+                        multipart_files.append((f"files[{i}]", (file_name, f)))
+                    multipart_files.append(("payload_json", (None, json.dumps(payload), "application/json")))
+                    response = requests.post(
+                        webhook_url,
+                        files=multipart_files,
+                        timeout=30,
+                        verify=False
+                    )
+                finally:
+                    for f in opened_files:
+                        try:
+                            f.close()
+                        except Exception:
+                            pass
+            else:
+                response = requests.post(
+                    webhook_url,
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(payload),
+                    timeout=10,
+                    verify=False
+                )
             response.raise_for_status()
             return response.status_code in (200, 204)
         except requests.exceptions.RequestException as e:
             print(f"Channel Logger | Webhook error: {e}", type_="ERROR")
             return False
+
+    async def download_attachment(att):
+        try:
+            loop = asyncio.get_event_loop()
+
+            def _fetch():
+                r = requests.get(att.url, timeout=20, verify=False)
+                r.raise_for_status()
+                return r.content
+
+            data = await loop.run_in_executor(None, _fetch)
+            temp_dir = Path(getScriptsPath()) / "tmp"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = f"{att.id}_{att.filename}"
+            file_path = temp_dir / safe_name
+            with open(file_path, "wb") as f:
+                f.write(data)
+            return str(file_path), att.filename
+        except Exception as e:
+            print(f"Channel Logger | Attachment download failed: {e}", type_="ERROR")
+            return None, None
 
     def extract_all_urls(text):
         if not text:
@@ -158,9 +224,56 @@ def ChannelLogger():
                 return source["destination_channel_id"]
         return None
 
-    def find_matched_source(config, channel_id, server_id, category_id=None):
+    def get_all_dest_channel_ids(config):
+        return {s["destination_channel_id"] for s in config.get("sources", []) if s.get("destination_channel_id")}
+
+    def get_channel_context(channel):
+        channel_id = str(channel.id)
+        parent_channel_id = None
+        category_id = None
+        if isinstance(channel, discord.Thread):
+            parent_channel_id = str(channel.parent_id) if channel.parent_id else None
+            parent = channel.parent
+            if parent and hasattr(parent, "category_id") and parent.category_id:
+                category_id = str(parent.category_id)
+        else:
+            if hasattr(channel, "category_id") and channel.category_id:
+                category_id = str(channel.category_id)
+        return channel_id, parent_channel_id, category_id
+
+    def is_forum_channel(channel):
+        return isinstance(channel, discord.ForumChannel)
+
+    def get_active_forum_threads(channel):
+        if not is_forum_channel(channel):
+            return []
+        threads = []
+        try:
+            for thread in getattr(channel, "threads", []):
+                threads.append(thread)
+        except Exception:
+            pass
+        unique = {}
+        for thread in threads:
+            try:
+                unique[str(thread.id)] = thread
+            except Exception:
+                pass
+        return list(unique.values())
+
+    def get_channel_display_name(channel):
+        if isinstance(channel, discord.Thread):
+            parent_name = channel.parent.name if channel.parent else "unknown"
+            return f"{parent_name} > {channel.name}"
+        return channel.name if hasattr(channel, "name") else "unknown"
+
+    def find_matched_source(config, channel_id, server_id, category_id=None, parent_channel_id=None):
         for source in config.get("sources", []):
+            if source["type"] == "thread" and source["id"] == channel_id:
+                return source
             if source["type"] == "channel" and source["id"] == channel_id:
+                return source
+            if source["type"] == "channel" and parent_channel_id and source["id"] == parent_channel_id:
                 return source
             if source["type"] == "category" and category_id and source["id"] == category_id and source.get("server_id") == server_id:
                 return source
@@ -183,9 +296,16 @@ def ChannelLogger():
             elif stype == "category":
                 sv = bot.get_guild(int(server_id))
                 src_str = f"Category: {sv.name} > {sv.get_channel(int(sid)).name}"
+            elif stype == "thread":
+                ch = bot.get_channel(int(sid))
+                parent_name = ch.parent.name if getattr(ch, "parent", None) else "unknown"
+                src_str = f"{ch.guild.name} > [thread] {parent_name} > {ch.name}"
             else:
                 ch = bot.get_channel(int(sid))
-                src_str = f"{ch.guild.name} > #{ch.name}"
+                if isinstance(ch, discord.ForumChannel):
+                    src_str = f"{ch.guild.name} > [forum] {ch.name}"
+                else:
+                    src_str = f"{ch.guild.name} > #{ch.name}"
         except:
             src_str = f"{stype} {sid}"
         return f"{src_str}  ->  {dest_str}"
@@ -208,26 +328,33 @@ def ChannelLogger():
     ping_toggle = toggle_row_2.create_ui_element(UI.Toggle, label="Ping on Log")
 
     toggle_row_3 = settings_card.create_group(type="columns", gap=4)
+    log_on_send_toggle = toggle_row_3.create_ui_element(UI.Toggle, label="Log on Send")
     log_deleted_toggle = toggle_row_3.create_ui_element(UI.Toggle, label="Log Deleted Messages")
-    log_edited_toggle = toggle_row_3.create_ui_element(UI.Toggle, label="Log Edited Messages")
 
     toggle_row_4 = settings_card.create_group(type="columns", gap=4)
+    log_edited_toggle = toggle_row_4.create_ui_element(UI.Toggle, label="Log Edited Messages")
     log_bulk_toggle = toggle_row_4.create_ui_element(UI.Toggle, label="Log Bulk Deleted")
-    log_embeds_toggle = toggle_row_4.create_ui_element(UI.Toggle, label="Log Embeds")
 
-    log_attachments_toggle = settings_card.create_ui_element(UI.Toggle, label="Log Attachments")
+    toggle_row_5 = settings_card.create_group(type="columns", gap=4)
+    log_embeds_toggle = toggle_row_5.create_ui_element(UI.Toggle, label="Log Embeds")
+    log_attachments_toggle = toggle_row_5.create_ui_element(UI.Toggle, label="Log Attachments")
+
     save_settings_btn = settings_card.create_ui_element(UI.Button, label="Save", variant="cta", full_width=True)
 
     dest_card = top_row.create_card(gap=2)
     dest_card.create_ui_element(UI.Text, content="Log Destination", size="lg", weight="bold")
     dest_card.create_ui_element(UI.Text, content="Selected destination will be used when adding a source.", size="sm", color="#6b7280")
 
-    dest_servers_list = [{"id": "select_server", "title": "Select server"}]
-    for server in bot.guilds:
-        dest_servers_list.append({
-            "id": str(server.id), "title": server.name,
-            "iconUrl": server.icon.url if server.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
-        })
+    def build_server_list():
+        servers_list = [{"id": "select_server", "title": "Select server"}]
+        for server in bot.guilds:
+            servers_list.append({
+                "id": str(server.id), "title": server.name,
+                "iconUrl": server.icon.url if server.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
+            })
+        return servers_list
+
+    dest_servers_list = build_server_list()
 
     dest_server_select = dest_card.create_ui_element(UI.Select, label="Server", items=dest_servers_list, disabled_items=["select_server"], mode="single", full_width=True)
     dest_channel_select = dest_card.create_ui_element(UI.Select, label="Channel", items=[{"id": "select_channel", "title": "Select server first"}], disabled_items=["select_channel"], mode="single", full_width=True)
@@ -237,18 +364,14 @@ def ChannelLogger():
 
     add_card = bottom_row.create_card(gap=2)
     add_card.create_ui_element(UI.Text, content="Add Source", size="lg", weight="bold")
-    add_card.create_ui_element(UI.Text, content="Select server only -> log full server\nSelect server + category -> log full category\nSelect server + category + channel -> log single channel", size="sm", color="#6b7280")
+    add_card.create_ui_element(UI.Text, content="Select server only -> log full server\nSelect server + category -> log full category\nSelect server + category + channel -> log single channel\nForum channels are supported as a channel source.", size="sm", color="#6b7280")
 
-    source_servers_list = [{"id": "select_server", "title": "Select server"}]
-    for server in bot.guilds:
-        source_servers_list.append({
-            "id": str(server.id), "title": server.name,
-            "iconUrl": server.icon.url if server.icon else "https://cdn.discordapp.com/embed/avatars/0.png"
-        })
+    source_servers_list = build_server_list()
 
     source_server_select = add_card.create_ui_element(UI.Select, label="Server", items=source_servers_list, disabled_items=["select_server"], mode="single", full_width=True)
     source_category_select = add_card.create_ui_element(UI.Select, label="Category (optional)", items=[{"id": "none", "title": "No category — full server"}], mode="single", full_width=True)
     source_channel_select = add_card.create_ui_element(UI.Select, label="Channel (optional)", items=[{"id": "none", "title": "No channel — full category/server"}], mode="single", full_width=True)
+    source_thread_select = add_card.create_ui_element(UI.Select, label="Thread (optional)", items=[{"id": "none", "title": "No thread — all channel/forum posts"}], mode="single", full_width=True)
     add_source_btn = add_card.create_ui_element(UI.Button, label="Add Source", variant="cta", full_width=True)
 
     manage_card = bottom_row.create_card(gap=2)
@@ -295,6 +418,7 @@ def ChannelLogger():
 
     def update_source_category_list(selected_server_ids):
         source_channel_select.items = [{"id": "none", "title": "No channel — full category/server"}]
+        source_thread_select.items = [{"id": "none", "title": "No thread — all channel/forum posts"}]
         if not selected_server_ids or selected_server_ids[0] in ["", "select_server"]:
             source_category_select.items = [{"id": "none", "title": "No category — full server"}]
             return
@@ -308,6 +432,7 @@ def ChannelLogger():
             print(f"Channel Logger | Error updating categories: {e}", type_="ERROR")
 
     def update_source_channel_list(selected_category_ids):
+        source_thread_select.items = [{"id": "none", "title": "No thread — all channel/forum posts"}]
         server_sel = source_server_select.selected_items
         if not selected_category_ids or selected_category_ids[0] in ["", "none"]:
             if not server_sel or server_sel[0] in ["", "select_server"]:
@@ -316,8 +441,10 @@ def ChannelLogger():
             try:
                 server = bot.get_guild(int(server_sel[0]))
                 ch_list = [{"id": "none", "title": "No channel — full server"}]
-                for ch in server.text_channels:
-                    ch_list.append({"id": str(ch.id), "title": f"#{ch.name}"})
+                for ch in server.channels:
+                    if isinstance(ch, (discord.TextChannel, discord.ForumChannel)):
+                        label = f"#{ch.name}" if isinstance(ch, discord.TextChannel) else f"[forum] {ch.name}"
+                        ch_list.append({"id": str(ch.id), "title": label})
                 source_channel_select.items = ch_list
             except Exception as e:
                 print(f"Channel Logger | Error loading channels: {e}", type_="ERROR")
@@ -329,11 +456,40 @@ def ChannelLogger():
                 source_channel_select.items = [{"id": "none", "title": "Category not found"}]
                 return
             ch_list = [{"id": "none", "title": "No channel — full category"}]
-            for ch in category.text_channels:
-                ch_list.append({"id": str(ch.id), "title": f"#{ch.name}"})
+            for ch in category.channels:
+                if isinstance(ch, (discord.TextChannel, discord.ForumChannel)):
+                    label = f"#{ch.name}" if isinstance(ch, discord.TextChannel) else f"[forum] {ch.name}"
+                    ch_list.append({"id": str(ch.id), "title": label})
             source_channel_select.items = ch_list
         except Exception as e:
             print(f"Channel Logger | Error updating channels for category: {e}", type_="ERROR")
+
+    def update_source_thread_list(selected_channel_ids):
+        source_thread_select.items = [{"id": "none", "title": "No thread — all channel/forum posts"}]
+        if not selected_channel_ids or selected_channel_ids[0] in ["", "none"]:
+            return
+        try:
+            channel = bot.get_channel(int(selected_channel_ids[0]))
+            if not channel:
+                return
+            if isinstance(channel, discord.ForumChannel):
+                threads = get_active_forum_threads(channel)
+                items = [{"id": "none", "title": "No thread — all forum posts"}]
+                for thread in sorted(threads, key=lambda t: getattr(t, "created_at", datetime.min), reverse=True):
+                    items.append({"id": str(thread.id), "title": thread.name})
+                source_thread_select.items = items
+            elif isinstance(channel, discord.TextChannel):
+                threads = []
+                try:
+                    threads.extend(list(channel.threads))
+                except Exception:
+                    pass
+                items = [{"id": "none", "title": "No thread — all channel messages"}]
+                for thread in sorted(threads, key=lambda t: getattr(t, "created_at", datetime.min), reverse=True):
+                    items.append({"id": str(thread.id), "title": thread.name})
+                source_thread_select.items = items
+        except Exception as e:
+            print(f"Channel Logger | Error updating threads: {e}", type_="ERROR")
 
     def update_display():
         config = load_config()
@@ -373,6 +529,7 @@ def ChannelLogger():
         config["log_self"] = log_self_toggle.checked
         config["notify_on_log"] = notify_toggle.checked
         config["ping_on_log"] = ping_toggle.checked
+        config["log_on_send"] = log_on_send_toggle.checked
         config["log_deleted"] = log_deleted_toggle.checked
         config["log_edited"] = log_edited_toggle.checked
         config["log_bulk_deleted"] = log_bulk_toggle.checked
@@ -401,12 +558,17 @@ def ChannelLogger():
         server_id = server_sel[0]
         category_sel = source_category_select.selected_items
         channel_sel = source_channel_select.selected_items
+        thread_sel = source_thread_select.selected_items
         category_id = category_sel[0] if category_sel and category_sel[0] not in ["", "none"] else None
         channel_id = channel_sel[0] if channel_sel and channel_sel[0] not in ["", "none"] else None
+        thread_id = thread_sel[0] if thread_sel and thread_sel[0] not in ["", "none"] else None
 
         config = load_config()
         for s in config.get("sources", []):
-            if channel_id and s["type"] == "channel" and s["id"] == channel_id:
+            if thread_id and s["type"] == "thread" and s["id"] == thread_id:
+                tab.toast(type="ERROR", title="Already Added", description="This thread is already being logged.")
+                return
+            if channel_id and not thread_id and s["type"] == "channel" and s["id"] == channel_id:
                 tab.toast(type="ERROR", title="Already Added", description="This channel is already being logged.")
                 return
             if category_id and not channel_id and s["type"] == "category" and s["id"] == category_id:
@@ -427,7 +589,9 @@ def ChannelLogger():
                     tab.toast(type="ERROR", title="Webhook Failed", description="Could not create webhook in destination channel.")
                     return
 
-            if channel_id:
+            if thread_id:
+                stype, sid, sv_id = "thread", thread_id, None
+            elif channel_id:
                 stype, sid, sv_id = "channel", channel_id, None
             elif category_id:
                 stype, sid, sv_id = "category", category_id, server_id
@@ -473,7 +637,7 @@ def ChannelLogger():
         wh_id = removed.get("webhook_id")
         wh_token = removed.get("webhook_token")
         if wh_id and wh_token and not any(s.get("webhook_url") == wh_url for s in sources):
-            await run_in_thread(lambda: requests.delete(f"https://discord.com/api/v9/webhooks/{wh_id}/{wh_token}", timeout=10))
+            await run_in_thread(lambda: requests.delete(f"https://discord.com/api/v9/webhooks/{wh_id}/{wh_token}", timeout=10, verify=False))
         if save_config(config):
             refresh_channels()
             tab.toast(type="SUCCESS", title="Source Removed", description="Source has been removed.")
@@ -487,19 +651,53 @@ def ChannelLogger():
     dest_channel_select.onChange = update_dest_status
     source_server_select.onChange = update_source_category_list
     source_category_select.onChange = update_source_channel_list
+    source_channel_select.onChange = update_source_thread_list
+
+    def hydrate_dropdowns():
+        dest_server_select.items = build_server_list()
+        source_server_select.items = build_server_list()
+
+        dest_sel = dest_server_select.selected_items
+        if dest_sel and dest_sel[0] not in ["", "select_server"]:
+            update_dest_channel_list(dest_sel)
+
+        src_sel = source_server_select.selected_items
+        if src_sel and src_sel[0] not in ["", "select_server"]:
+            update_source_category_list(src_sel)
+
+        config = load_config()
+        last_dest = get_last_dest_channel_id(config)
+        if last_dest:
+            try:
+                ch = bot.get_channel(int(last_dest))
+                if ch and ch.guild:
+                    dest_server_select.selected_items = [str(ch.guild.id)]
+                    update_dest_channel_list([str(ch.guild.id)])
+                    dest_channel_select.selected_items = [last_dest]
+                    dest_current_text.content = f"Will log to: {ch.guild.name} -> #{ch.name}"
+                    dest_current_text.color = "#4ade80"
+            except Exception:
+                pass
+
+        refresh_channels()
 
     @bot.listen('on_message')
     async def log_message(message):
         config = load_config()
         if not config["enabled"]:
             return
+        if not config.get("log_on_send", True):
+            return
         if not config.get("log_self", False) and message.author.id == bot.user.id:
             return
 
-        current_channel_id = str(message.channel.id)
+        current_channel_id, parent_channel_id, category_id = get_channel_context(message.channel)
         current_server_id = str(message.guild.id) if message.guild else None
-        category_id = str(message.channel.category_id) if hasattr(message.channel, 'category_id') and message.channel.category_id else None
-        matched = find_matched_source(config, current_channel_id, current_server_id, category_id)
+
+        if current_channel_id in get_all_dest_channel_ids(config):
+            return
+
+        matched = find_matched_source(config, current_channel_id, current_server_id, category_id, parent_channel_id)
         if not matched:
             return
 
@@ -509,34 +707,12 @@ def ChannelLogger():
 
         theme_color, theme_small_image, theme_large_image = get_theme_values()
         server_name = message.guild.name if message.guild else "Direct Message"
-        channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
+        channel_name = get_channel_display_name(message.channel)
         message_link = f"https://discord.com/channels/{message.guild.id if message.guild else '@me'}/{message.channel.id}/{message.id}"
 
         content_text = message.content or ""
-        inline_urls = extract_all_urls(content_text)
-        attachments = [att.url for att in message.attachments] if message.attachments else []
-
-        links_to_send = []
-        if config.get("log_attachments", True):
-            for u in inline_urls:
-                if u not in links_to_send:
-                    links_to_send.append(u)
-            for a in attachments:
-                if a not in links_to_send:
-                    links_to_send.append(a)
-
-        media_urls = [u for u in links_to_send if re.search(r'\.(?:jpg|jpeg|png|gif|webp|bmp)(\?|$)', u, re.IGNORECASE)]
-        other_links = [u for u in links_to_send if u not in media_urls]
-
-        cleaned_content = content_text
-        if links_to_send and cleaned_content:
-            for l in links_to_send:
-                cleaned_content = cleaned_content.replace(l, "")
-            cleaned_content = re.sub(r'\s+\n', '\n', cleaned_content)
-            cleaned_content = re.sub(r'\n{3,}', '\n\n', cleaned_content)
-            cleaned_content = cleaned_content.strip() or None
-        else:
-            cleaned_content = cleaned_content or None
+        attachment_urls = set(att.url for att in message.attachments) if message.attachments else set()
+        cleaned_content = content_text or None
 
         author_display = message.author.name
         if hasattr(message.author, 'discriminator') and message.author.discriminator and message.author.discriminator != '0':
@@ -559,16 +735,57 @@ def ChannelLogger():
             ]
         }
 
-        if theme_small_image and not links_to_send:
+        if theme_small_image:
             embed_data["thumbnail"] = {"url": theme_small_image}
-        if theme_large_image and not links_to_send:
+        if theme_large_image:
             embed_data["image"] = {"url": theme_large_image}
 
         try:
             avatar_url = message.guild.icon.url if message.guild and message.guild.icon else None
-            content_to_send = f"<@{bot.user.id}>" if config.get("ping_on_log", False) else None
 
-            success = await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=content_to_send, embed_data=embed_data, username=server_name, avatar_url=avatar_url)
+            inline_urls = extract_all_urls(content_text)
+            ping_content = f"<@{bot.user.id}>" if config.get("ping_on_log", False) else None
+            content_to_send = ping_content
+
+            extra_embeds = []
+            if config.get("log_embeds", True) and message.embeds:
+                for original_embed in message.embeds:
+                    ed = original_embed.to_dict()
+                    embed_type = ed.get("type", "")
+                    if embed_type in ("link", "image", "video", "gifv"):
+                        continue
+                    embed_url = ed.get("url", "")
+                    image_url = (ed.get("image") or {}).get("url", "")
+                    video_url = (ed.get("video") or {}).get("url", "")
+                    thumb_url = (ed.get("thumbnail") or {}).get("url", "")
+                    if any(u in attachment_urls for u in [embed_url, image_url, video_url, thumb_url]):
+                        continue
+                    extra_embeds.append(ed)
+
+            downloaded_files = []
+            if config.get("log_attachments", True) and message.attachments:
+                results = await asyncio.gather(*[download_attachment(att) for att in message.attachments], return_exceptions=True)
+                for r in results:
+                    if not isinstance(r, Exception) and r and r[0] and r[1]:
+                        downloaded_files.append(r)
+
+            success = await run_in_thread(
+                send_webhook_message,
+                webhook_url=webhook_url,
+                content=content_to_send,
+                embed_data=embed_data,
+                embeds=extra_embeds if extra_embeds else None,
+                username=server_name,
+                avatar_url=avatar_url,
+                files=downloaded_files[:10] if downloaded_files else None
+            )
+
+            for fp, _ in downloaded_files:
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+
             if not success:
                 print("Channel Logger | Webhook send failed, attempting to recreate...", type_="ERROR")
                 dest_id = matched.get("destination_channel_id")
@@ -582,22 +799,34 @@ def ChannelLogger():
                             s["webhook_token"] = new_token
                     save_config(cfg)
                     webhook_url = new_url
-                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=content_to_send, embed_data=embed_data, username=server_name, avatar_url=avatar_url)
+                    await run_in_thread(
+                        send_webhook_message,
+                        webhook_url=webhook_url,
+                        content=content_to_send,
+                        embed_data=embed_data,
+                        embeds=extra_embeds if extra_embeds else None,
+                        username=server_name,
+                        avatar_url=avatar_url
+                    )
                 else:
                     print("Channel Logger | Could not recreate webhook.", type_="ERROR")
                     return
 
-            for link in other_links:
-                await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=link, username=server_name, avatar_url=avatar_url)
-            for media in media_urls:
-                await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=media, username=server_name, avatar_url=avatar_url)
+            for i in range(10, len(downloaded_files), 10):
+                await run_in_thread(
+                    send_webhook_message,
+                    webhook_url=webhook_url,
+                    username=server_name,
+                    avatar_url=avatar_url,
+                    files=downloaded_files[i:i+10]
+                )
 
-            if config.get("log_embeds", True) and message.embeds:
-                for original_embed in message.embeds:
-                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, embed_data=original_embed.to_dict(), username=server_name, avatar_url=avatar_url)
+            if inline_urls:
+                for url in inline_urls:
+                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=url, username=server_name, avatar_url=avatar_url)
 
             if config.get("notify_on_log", True):
-                print(f"Channel Logger | Logged message from {message.author.name} in #{channel_name} ({server_name})", type_="INFO")
+                print(f"Channel Logger | Logged message from {message.author.name} in {channel_name} ({server_name})", type_="INFO")
         except Exception as e:
             print(f"Channel Logger | Error logging message: {e}", type_="ERROR")
 
@@ -607,10 +836,13 @@ def ChannelLogger():
         if not config["enabled"] or not config.get("log_deleted", True):
             return
 
-        current_channel_id = str(message.channel.id)
+        current_channel_id, parent_channel_id, category_id = get_channel_context(message.channel)
         current_server_id = str(message.guild.id) if message.guild else None
-        category_id = str(message.channel.category_id) if hasattr(message.channel, 'category_id') and message.channel.category_id else None
-        matched = find_matched_source(config, current_channel_id, current_server_id, category_id)
+
+        if current_channel_id in get_all_dest_channel_ids(config):
+            return
+
+        matched = find_matched_source(config, current_channel_id, current_server_id, category_id, parent_channel_id)
         if not matched:
             return
 
@@ -619,7 +851,7 @@ def ChannelLogger():
             return
 
         server_name = message.guild.name if message.guild else "Direct Message"
-        channel_name = message.channel.name if hasattr(message.channel, 'name') else "DM"
+        channel_name = get_channel_display_name(message.channel)
         author_display = message.author.name if message.author else "Unknown"
         if message.author and hasattr(message.author, 'discriminator') and message.author.discriminator and message.author.discriminator != '0':
             author_display = f"{message.author.name}#{message.author.discriminator}"
@@ -645,7 +877,49 @@ def ChannelLogger():
 
         try:
             avatar_url = message.guild.icon.url if message.guild and message.guild.icon else None
-            success = await run_in_thread(send_webhook_message, webhook_url=webhook_url, embed_data=embed_data, username=server_name, avatar_url=avatar_url)
+
+            deleted_content = message.content or ""
+            inline_urls = extract_all_urls(deleted_content)
+            attachment_urls = set(att.url for att in message.attachments) if message.attachments else set()
+
+            extra_embeds = []
+            if config.get("log_embeds", True) and message.embeds:
+                for original_embed in message.embeds:
+                    ed = original_embed.to_dict()
+                    embed_type = ed.get("type", "")
+                    if embed_type in ("link", "image", "video", "gifv"):
+                        continue
+                    embed_url = ed.get("url", "")
+                    image_url = (ed.get("image") or {}).get("url", "")
+                    video_url = (ed.get("video") or {}).get("url", "")
+                    thumb_url = (ed.get("thumbnail") or {}).get("url", "")
+                    if any(u in attachment_urls for u in [embed_url, image_url, video_url, thumb_url]):
+                        continue
+                    extra_embeds.append(ed)
+
+            downloaded_files = []
+            if config.get("log_attachments", True) and message.attachments:
+                results = await asyncio.gather(*[download_attachment(att) for att in message.attachments], return_exceptions=True)
+                for r in results:
+                    if not isinstance(r, Exception) and r and r[0] and r[1]:
+                        downloaded_files.append(r)
+
+            success = await run_in_thread(
+                send_webhook_message,
+                webhook_url=webhook_url,
+                embed_data=embed_data,
+                embeds=extra_embeds if extra_embeds else None,
+                username=server_name,
+                avatar_url=avatar_url,
+                files=downloaded_files[:10] if downloaded_files else None
+            )
+
+            for fp, _ in downloaded_files:
+                try:
+                    os.remove(fp)
+                except Exception:
+                    pass
+
             if not success:
                 dest_id = matched.get("destination_channel_id")
                 new_url, new_id, new_token = await run_in_thread(create_webhook, dest_id, "Channel Logger")
@@ -657,7 +931,20 @@ def ChannelLogger():
                             s["webhook_id"] = new_id
                             s["webhook_token"] = new_token
                     save_config(cfg)
-                    await run_in_thread(send_webhook_message, webhook_url=new_url, embed_data=embed_data, username=server_name, avatar_url=avatar_url)
+                    await run_in_thread(send_webhook_message, webhook_url=new_url, embed_data=embed_data, embeds=extra_embeds if extra_embeds else None, username=server_name, avatar_url=avatar_url)
+
+            for i in range(10, len(downloaded_files), 10):
+                await run_in_thread(
+                    send_webhook_message,
+                    webhook_url=webhook_url,
+                    username=server_name,
+                    avatar_url=avatar_url,
+                    files=downloaded_files[i:i+10]
+                )
+
+            if inline_urls:
+                for url in inline_urls:
+                    await run_in_thread(send_webhook_message, webhook_url=webhook_url, content=url, username=server_name, avatar_url=avatar_url)
         except Exception as e:
             print(f"Channel Logger | Error logging deleted message: {e}", type_="ERROR")
 
@@ -669,10 +956,13 @@ def ChannelLogger():
         if message_before.content == message_after.content:
             return
 
-        current_channel_id = str(message_after.channel.id)
+        current_channel_id, parent_channel_id, category_id = get_channel_context(message_after.channel)
         current_server_id = str(message_after.guild.id) if message_after.guild else None
-        category_id = str(message_after.channel.category_id) if hasattr(message_after.channel, 'category_id') and message_after.channel.category_id else None
-        matched = find_matched_source(config, current_channel_id, current_server_id, category_id)
+
+        if current_channel_id in get_all_dest_channel_ids(config):
+            return
+
+        matched = find_matched_source(config, current_channel_id, current_server_id, category_id, parent_channel_id)
         if not matched:
             return
 
@@ -681,7 +971,7 @@ def ChannelLogger():
             return
 
         server_name = message_after.guild.name if message_after.guild else "Direct Message"
-        channel_name = message_after.channel.name if hasattr(message_after.channel, 'name') else "DM"
+        channel_name = get_channel_display_name(message_after.channel)
         message_link = f"https://discord.com/channels/{message_after.guild.id if message_after.guild else '@me'}/{message_after.channel.id}/{message_after.id}"
         edited_at = message_after.edited_at if message_after.edited_at else datetime.utcnow()
         author_display = message_after.author.name
@@ -733,10 +1023,13 @@ def ChannelLogger():
             return
 
         first = messages[0]
-        current_channel_id = str(first.channel.id)
+        current_channel_id, parent_channel_id, category_id = get_channel_context(first.channel)
         current_server_id = str(first.guild.id) if first.guild else None
-        category_id = str(first.channel.category_id) if hasattr(first.channel, 'category_id') and first.channel.category_id else None
-        matched = find_matched_source(config, current_channel_id, current_server_id, category_id)
+
+        if current_channel_id in get_all_dest_channel_ids(config):
+            return
+
+        matched = find_matched_source(config, current_channel_id, current_server_id, category_id, parent_channel_id)
         if not matched:
             return
 
@@ -745,7 +1038,7 @@ def ChannelLogger():
             return
 
         server_name = first.guild.name if first.guild else "Direct Message"
-        channel_name = first.channel.name if hasattr(first.channel, 'name') else "DM"
+        channel_name = get_channel_display_name(first.channel)
         cached = [m for m in messages if m.content or m.author]
         summary_lines = []
         for m in cached[:20]:
@@ -828,28 +1121,24 @@ def ChannelLogger():
     log_self_toggle.checked = config.get("log_self", False)
     notify_toggle.checked = config.get("notify_on_log", True)
     ping_toggle.checked = config.get("ping_on_log", False)
+    log_on_send_toggle.checked = config.get("log_on_send", True)
     log_deleted_toggle.checked = config.get("log_deleted", True)
     log_edited_toggle.checked = config.get("log_edited", True)
     log_bulk_toggle.checked = config.get("log_bulk_deleted", True)
     log_embeds_toggle.checked = config.get("log_embeds", True)
     log_attachments_toggle.checked = config.get("log_attachments", True)
 
-    last_dest = get_last_dest_channel_id(config)
-    if last_dest:
-        try:
-            ch = bot.get_channel(int(last_dest))
-            if ch and ch.guild:
-                dest_server_select.selected_items = [str(ch.guild.id)]
-                update_dest_channel_list([str(ch.guild.id)])
-                dest_channel_select.selected_items = [last_dest]
-                dest_current_text.content = f"Will log to: {ch.guild.name} -> #{ch.name}"
-                dest_current_text.color = "#4ade80"
-        except:
-            pass
-
-    refresh_channels()
     tab.render()
+    hydrate_dropdowns()
     bot.loop.create_task(validate_all_webhooks())
 
+    last_sid = [None]
+
+    @socketio.on("connect")
+    def con():
+        c_sid = request.sid
+        if c_sid != last_sid[0]:
+            hydrate_dropdowns()
+        last_sid[0] = c_sid
 
 ChannelLogger()

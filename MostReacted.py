@@ -1,3 +1,11 @@
+
+
+@nightyScript(
+    name="Most Reacted",
+    author="0pyr",
+    description="Finds the most reacted message in a channel.",
+    usage="<p>mostreacted <channelID>"
+)
 def most_reacted_script():
     import asyncio
     from datetime import datetime, timedelta

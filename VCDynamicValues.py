@@ -1,3 +1,9 @@
+@nightyScript(
+    name="VC Dynamic Values",
+    author="0pyr",
+    description="Adds dynamic values for VC state: vc_status, vc_info, vc_start",
+    usage="For rich presence dynamic values"
+)
 def VCValues():
     IDLE_TS = "6372891638687"
 

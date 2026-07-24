@@ -1,10 +1,45 @@
+@nightyScript(
+    name="Weather Dynamic Values",
+    author="0pyr",
+    description="Live weather as dynamic values for rich presence. Run <p>weatherhelp to get started with the setup.",
+    usage="<p>weatherhelp, <p>weatherset <key> <city>, <p>weathercity <city>, <p>weatherunits <metric|imperial> <p>weathertest"
+        """
+    WEATHER DYNAMIC VALUES
+    ----------------------
+    Provides live weather data as dynamic values for Nighty rich presence.
+
+    DYNAMIC VALUES:
+    {weather_temp}        - Current temperature (e.g. "72 F")
+    {weather_feels_like}  - Feels like temperature (e.g. "69 F")
+    {weather_desc}        - Short weather description (e.g. "clear sky")
+    {weather_humidity}    - Humidity percentage (e.g. "54%")
+    {weather_city}        - City name from API response (e.g. "Dallas")
+    {weather_full}        - One-line summary (e.g. "Dallas: 72 F, clear sky")
+
+    COMMANDS:
+    <p>weatherhelp                        - Setup guide and command reference
+    <p>weatherset <api_key> <city>        - Set API key and city
+    <p>weathercity <city>                 - Change city only
+    <p>weatherunits <metric|imperial>     - Toggle Celsius / Fahrenheit
+    <p>weathertest                        - Fetch weather now
+
+    NOTES:
+    - API key from https://openweathermap.org (free tier works)
+    - New API keys can take up to 2 hours to activate after signup
+    - City format: "CityName,CountryCode" e.g. "London,GB" or "Dallas,US"
+    - Weather data is cached for 5 minutes to avoid rate limiting
+    """
+)
 def WeatherDynamicValues():
     import requests
     import time
 
     CACHE_TTL = 300
+
     DEFAULT_CITY = "Dallas,US"
+
     DEFAULT_UNITS = "imperial"
+
     OWM_URL = "https://api.openweathermap.org/data/2.5/weather"
 
     HELP_TEXT = (
@@ -245,6 +280,5 @@ def WeatherDynamicValues():
     addDRPCValue("weather_humidity",   weather_humidity)
     addDRPCValue("weather_city",       weather_city)
     addDRPCValue("weather_full",       weather_full)
-
 
 WeatherDynamicValues()

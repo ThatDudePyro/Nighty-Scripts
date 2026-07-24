@@ -1,3 +1,29 @@
+@nightyScript(
+    name="Interactive Permission Setter",
+    author="0pyr",
+    description="Step-by-step guided flow: pick a channel, pick a role, pick permissions to set. No memorizing IDs.",
+    usage="<p>setperms, <p>iperms, or <p>sp to start the flow. Type 'cancel' at any step to abort."
+        """
+    INTERACTIVE PERMISSION SETTER
+    ------------------------------
+
+    Guided multi-step flow for setting channel permissions.
+    Run the command and it'll walk you through it like you're five.
+
+    Step 1 — Lists all channels. You type a number to pick one.
+    Step 2 — Lists all roles. You type a number to pick one.
+    Step 3 — Lists permissions with their current state. You type numbers to toggle.
+    Step 4 — Confirm and apply. Or cancel.
+
+    COMMANDS:
+    <p>setperms        - Start the interactive permission setup flow
+
+    NOTES:
+    - Only responds to your own messages during the flow (selfbot only).
+    - Type 'cancel' at any step to abort.
+    - Multiple sessions not supported — finish or cancel before starting a new one.
+    """,
+)
 def iperms_script():
     import asyncio
     import traceback
@@ -85,7 +111,7 @@ def iperms_script():
         session["step_msg"] = new_msg
         return new_msg
 
-    #  MAIN COMMAND 
+    #  MAIN COMMAND
     @bot.command(
         name="setperms",
         aliases=["sp", "iperms"],
@@ -302,7 +328,7 @@ def iperms_script():
             if user_id in active_sessions:
                 active_sessions[user_id]["locked"] = False
 
-    #  APPLY 
+    #  APPLY
     async def _apply_permissions(session):
         channel = session["channel"]
         role = session["role"]
